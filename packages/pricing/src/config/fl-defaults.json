@@ -1,0 +1,21 @@
+{
+  "version": "2026-08-13.1",
+  "wastePct": { "simple": 10, "average": 15, "cutUp": 22 },
+  "materialPerSquare": { "threeTab": 120, "architectural": 140, "metal": 450, "tile": 500 },
+  "laborPerSquare": { "walkable": 175, "steep": 250, "verySteep": 350 },
+  "storiesFactorPct": { "1": 100, "2": 110, "3": 125 },
+  "pitchBreaksDeg": { "steepFrom": 26.6, "verySteepFrom": 36.9 },
+  "permitByCounty": {
+    "Hillsborough": 425, "Pinellas": 400, "Pasco": 350, "Sarasota": 375,
+    "Miami-Dade": 600, "Broward": 550, "Palm Beach": 500, "default": 400
+  },
+  "hvhzPct": 12,
+  "disposalPerSquare": 55,
+  "underlaymentUpgradePerSquare": 45,
+  "ridgeVentFlat": 650,
+  "perSkylight": 750,
+  "gutterPerLf": 12,
+  "solarReadyFlat": 500,
+  "marginPct": 30,
+  "bandPct": 8
+}
