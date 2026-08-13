@@ -9,6 +9,13 @@ export function computeEstimate(
   sel: Selections,
   config: PricingConfig = defaultConfig
 ): Estimate {
+  if (!(roof.areaSqft > 0) || roof.areaSqft > 30000)
+    throw new RangeError('areaSqft must be in (0, 30000]');
+  if (roof.pitchDeg < 0 || roof.pitchDeg > 60)
+    throw new RangeError('pitchDeg must be in [0, 60]');
+  if (sel.skylights < 0 || !Number.isInteger(sel.skylights))
+    throw new RangeError('skylights must be a non-negative integer');
+  if (sel.gutterLf < 0) throw new RangeError('gutterLf must be >= 0');
   const wastePct = config.wastePct[roof.complexity];
   const squaresRaw = (roof.areaSqft * (100 + wastePct)) / 10000;
   const squares = Math.round(squaresRaw * 10) / 10;

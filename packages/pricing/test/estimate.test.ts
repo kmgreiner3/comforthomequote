@@ -1,15 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeEstimate } from '../src/estimate';
-import type { RoofInput, Selections } from '../src/types';
-
-export const baseRoof: RoofInput = {
-  areaSqft: 2000, pitchDeg: 20, stories: 1,
-  complexity: 'average', county: 'Hillsborough', hvhz: false,
-};
-export const baseSel: Selections = {
-  material: 'architectural', underlaymentUpgrade: false, ridgeVent: false,
-  skylights: 0, gutterLf: 0, solarReady: false,
-};
+import { baseRoof, baseSel } from './fixtures';
 
 const item = (e: ReturnType<typeof computeEstimate>, key: string) =>
   e.lineItems.find(li => li.key === key)?.amount;
