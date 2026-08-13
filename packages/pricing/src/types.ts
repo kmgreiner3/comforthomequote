@@ -42,7 +42,7 @@ export interface PricingConfig {
   laborPerSquare: Record<PitchClass, number>;    // $/square
   storiesFactorPct: Record<'1' | '2' | '3', number>; // integer %, 100 = ×1.0
   pitchBreaksDeg: { steepFrom: number; verySteepFrom: number };
-  permitByCounty: Record<string, number>;        // must include "default"
+  permitByCounty: Record<string, number> & { default: number }; // must include "default"
   hvhzPct: number;                               // integer %
   disposalPerSquare: number;
   underlaymentUpgradePerSquare: number;

@@ -17,3 +17,19 @@ describe('computeEstimate validation', () => {
     expect(() => computeEstimate(baseRoof, sel)).toThrow(RangeError);
   });
 });
+
+describe('computeEstimate JSON-boundary hardening', () => {
+  it.each([
+    [{ ...baseRoof, pitchDeg: Number.NaN }],
+    [{ ...baseRoof, stories: 4 as never }],
+    [{ ...baseRoof, complexity: 'extreme' as never }],
+  ])('rejects out-of-domain roof %j', (roof) => {
+    expect(() => computeEstimate(roof, baseSel)).toThrow(RangeError);
+  });
+  it.each([
+    [{ ...baseSel, material: 'slate' as never }],
+    [{ ...baseSel, gutterLf: Number.NaN }],
+  ])('rejects out-of-domain selections %j', (sel) => {
+    expect(() => computeEstimate(baseRoof, sel)).toThrow(RangeError);
+  });
+});

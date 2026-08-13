@@ -64,3 +64,22 @@ describe('computeEstimate HVHZ + county + options', () => {
     expect(a).toEqual(b);
   });
 });
+
+describe('computeEstimate material and pitch sweep', () => {
+  // base roof: squaresRaw 23, walkable labor 5233, permit 425, disposal 1645
+  it.each([
+    ['threeTab', 3588, 10891],       // 23×120=2760 → ×1.3
+    ['architectural', 4186, 11489],  // 23×140=3220 → ×1.3
+    ['metal', 13455, 20758],         // 23×450=10350 → ×1.3
+    ['tile', 14950, 22253],          // 23×500=11500 → ×1.3
+  ] as const)('prices %s correctly', (material, materials, subtotal) => {
+    const e = computeEstimate(baseRoof, { ...baseSel, material });
+    expect(item(e, 'materials')).toBe(materials);
+    expect(e.subtotal).toBe(subtotal);
+  });
+  it('prices verySteep labor (40° → 350/sq)', () => {
+    const e = computeEstimate({ ...baseRoof, pitchDeg: 40 }, baseSel);
+    expect(item(e, 'labor')).toBe(10465); // 23×350=8050 → ×1.3
+    expect(e.subtotal).toBe(16721);       // 4186+10465+425+1645
+  });
+});

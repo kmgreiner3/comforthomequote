@@ -11,11 +11,17 @@ export function computeEstimate(
 ): Estimate {
   if (!(roof.areaSqft > 0) || roof.areaSqft > 30000)
     throw new RangeError('areaSqft must be in (0, 30000]');
-  if (roof.pitchDeg < 0 || roof.pitchDeg > 60)
+  if (!(roof.pitchDeg >= 0 && roof.pitchDeg <= 60))
     throw new RangeError('pitchDeg must be in [0, 60]');
   if (sel.skylights < 0 || !Number.isInteger(sel.skylights))
     throw new RangeError('skylights must be a non-negative integer');
-  if (sel.gutterLf < 0) throw new RangeError('gutterLf must be >= 0');
+  if (!(sel.gutterLf >= 0)) throw new RangeError('gutterLf must be >= 0');
+  if (!(roof.complexity in config.wastePct))
+    throw new RangeError(`unknown complexity: ${roof.complexity}`);
+  if (!(sel.material in config.materialPerSquare))
+    throw new RangeError(`unknown material: ${sel.material}`);
+  if (!(`${roof.stories}` in config.storiesFactorPct))
+    throw new RangeError(`stories must be 1, 2, or 3`);
   const wastePct = config.wastePct[roof.complexity];
   const squaresRaw = (roof.areaSqft * (100 + wastePct)) / 10000;
   const squares = Math.round(squaresRaw * 10) / 10;
@@ -26,11 +32,11 @@ export function computeEstimate(
     Math.round((base * (100 + config.marginPct)) / 100);
 
   const pitchClass = pitchClassFromDeg(roof.pitchDeg, config);
-  const storiesPct = config.storiesFactorPct[String(roof.stories) as '1' | '2' | '3'];
+  const storiesPct = config.storiesFactorPct[`${roof.stories}`];
 
   const materialsBase = hvhz(squaresRaw * config.materialPerSquare[sel.material]);
   const laborBase = hvhz((squaresRaw * config.laborPerSquare[pitchClass] * storiesPct) / 100);
-  const permit = config.permitByCounty[roof.county] ?? config.permitByCounty['default']!;
+  const permit = config.permitByCounty[roof.county] ?? config.permitByCounty['default'];
 
   const lineItems: LineItem[] = [
     { key: 'materials', label: 'Materials', amount: withMargin(materialsBase) },
