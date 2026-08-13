@@ -51,7 +51,7 @@ A simple, transparent web flow where a Florida homeowner enters their address, i
 
 ```
 squares      = area/100 × (1 + waste%)          waste from complexity/segments
-materials    = squares × $/sq by material tier   (3-tab 350 / arch 450 / metal 1100 / tile 1300 — SEED)
+materials    = squares × $/sq by material tier   (material-only: 3-tab 120 / arch 140 / metal 450 / tile 500 — SEED, labor separate)
 labor        = squares × $/sq by pitch class (walkable/steep/very steep) × stories factor
 permit       = county fee table (7 seeded counties + default) + inspections
 hvhz adder   = % on materials+labor when Miami-Dade/Broward (fastening/code)
