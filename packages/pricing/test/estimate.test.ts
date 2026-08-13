@@ -42,3 +42,34 @@ describe('computeEstimate core', () => {
     expect(item(e, 'labor')).toBe(7475);
   });
 });
+
+describe('computeEstimate HVHZ + county + options', () => {
+  it('applies HVHZ adder to materials and labor only (Miami-Dade golden case)', () => {
+    const e = computeEstimate({ ...baseRoof, county: 'Miami-Dade', hvhz: true }, baseSel);
+    expect(item(e, 'materials')).toBe(4688);
+    expect(item(e, 'labor')).toBe(5860);
+    expect(item(e, 'permit')).toBe(600);
+    expect(item(e, 'disposal')).toBe(1645); // unchanged by HVHZ
+    expect(e.subtotal).toBe(12793);
+  });
+  it('falls back to default permit for unknown counties', () => {
+    const e = computeEstimate({ ...baseRoof, county: 'Okeechobee' }, baseSel);
+    expect(item(e, 'permit')).toBe(400);
+  });
+  it('prices every option with margin applied', () => {
+    const e = computeEstimate(baseRoof, {
+      ...baseSel, underlaymentUpgrade: true, ridgeVent: true,
+      skylights: 2, gutterLf: 120, solarReady: true,
+    });
+    expect(item(e, 'underlayment')).toBe(1346); // 23×45=1035 → ×1.3 = 1345.5 → 1346
+    expect(item(e, 'ridgeVent')).toBe(845);     // 650 → 845
+    expect(item(e, 'skylights')).toBe(1950);    // 1500 → 1950
+    expect(item(e, 'gutters')).toBe(1872);      // 1440 → 1872
+    expect(item(e, 'solarReady')).toBe(650);    // 500 → 650
+  });
+  it('is deterministic', () => {
+    const a = computeEstimate(baseRoof, baseSel);
+    const b = computeEstimate(baseRoof, baseSel);
+    expect(a).toEqual(b);
+  });
+});
