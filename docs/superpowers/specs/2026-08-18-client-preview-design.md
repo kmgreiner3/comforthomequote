@@ -1,6 +1,6 @@
 # ComfortHomeQuote — Client Preview Release Design
 
-**Date:** 2026-08-18 · **Status:** Approved (Kyle: password gate = branded page, password ComfortRoof2026, metal/tile education pages in, subagent execution)
+**Date:** 2026-08-18 · **Status:** Approved (Kyle: password gate = branded page (password shared out-of-band), metal/tile education pages in, subagent execution)
 **Sources:** `docs/client/pricing-rules.md`, `docs/client/website-copy.md`, `docs/client/ux-spec.md` (Dylan's vision — authoritative for pricing math and copy voice). **Architecture and UX decisions are ours** (Kyle's direction, 2026-08-18); deviations from the client spec are listed below and are deliberate.
 
 ## Goal
@@ -44,7 +44,7 @@ Model the site structure on The Zebra's quote-start pattern:
 
 - `app/web`: React 18 + Vite + TypeScript + Tailwind CSS v4 + react-router + zustand (persist) + motion. Routes: `/` (landing), `/build` (wizard: address → home-size → shingle → color → underlayment → protection → included → finishing → review), `/next` (partner → info → schedule → confirmation, demo mode), `/about`, `/metal`.
 - `packages/pricing` v2 (**replaces v1 internals**): progressive band engine per client rules. Public API: `SHINGLES` (product data incl. colors), `priceShingle(sq, productKey)`, `titanUpgrade(sq)`, `peelStickUpgrade(sq)`, `guarantee(shingle, underlayment) → {level, years}`, `estimatedMonthly(total)`, `cashPrice(total)`, `sqFromOutline(outlineSqft)`, `deckingAdjustment(sheets)`, `roundUpDollars(x)`, `METAL_TIERS`/`TILE` (data only), plus retained `monthlyPayment` (amortization, 6.99% APR context). v1 line-item model (computeEstimate/fl-defaults/pitch) is deleted — superseded by client rules. Client anchors are the golden tests.
-- **Password gate:** CloudFront Function (viewer-request) — allows `/gate.html` + gate assets; otherwise requires cookie `chq_preview=<sha256(password)>`; else 302 → `/gate.html`. Gate page: branded navy, logo, single input; SubtleCrypto sha256 → cookie (Max-Age 30d) → redirect. Password `ComfortRoof2026` (hash constant in function; rotate by redeploying TF). Plus `robots.txt` disallow-all during preview.
+- **Password gate:** CloudFront Function (viewer-request) — allows `/gate.html` + gate assets; otherwise requires cookie `chq_preview=<sha256(password)>`; else 302 → `/gate.html`. Gate page: branded navy, logo, single input; SubtleCrypto sha256 → cookie (Max-Age 30d) → redirect. Password shared out-of-band; only its sha256 hash is committed (rotate by changing the hash and redeploying TF). Plus `robots.txt` disallow-all during preview.
 - **Deploy:** `.github/workflows/deploy-web.yml` on push to main: build → OIDC-assume `chq-github-deploy` → `aws s3 sync app/web/dist → chq-site-984950935097 --delete` → CloudFront invalidation `/*`. Every merge = Dylan sees it (with the gate password).
 
 ## Out of scope (next plans)

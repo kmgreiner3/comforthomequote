@@ -533,7 +533,7 @@ Verification: build + typecheck; Playwright screenshots of `/metal` both widths 
 `infra/site/gate-function.js`:
 ```js
 // CloudFront Function (viewer-request): preview password gate.
-// Cookie must equal sha256("ComfortRoof2026") hex. Rotate: change HASH, terraform apply.
+// Cookie must equal the sha256 hex of the shared preview password. Rotate: change HASH, terraform apply.
 var HASH = 'REPLACE_WITH_SHA256_HEX'; // compute in Step 2
 
 function handler(event) {
@@ -574,7 +574,7 @@ and inside `default_cache_behavior`:
 `gate.html`: navy full-screen, centered logo + "Preview access" heading + tagline + single password input + button. JS: `crypto.subtle.digest('SHA-256', ...)` → hex; compare against the same HASH constant; on match set `document.cookie = 'chq_preview=' + hex + '; Max-Age=2592000; Path=/; Secure; SameSite=Lax'` then `location.replace('/')`; on mismatch shake the input + "That's not it — check with Kyle or Dylan." No password or plaintext hint in source (hash only).
 
 Steps:
-1. Compute the hash: `printf 'ComfortRoof2026' | shasum -a 256` — substitute into BOTH gate-function.js and gate.html.
+1. Compute the hash: `printf '<shared preview password>' | shasum -a 256` — substitute into BOTH gate-function.js and gate.html.
 2. `terraform fmt/validate/plan` in infra/site — expect 1 add (function) + 1 change in-place (distribution association), 0 destroy. FOREGROUND apply with long timeout (distribution update takes minutes).
 3. Verify gate: `curl -sI https://comforthomequote.com` → 302 with `location: /gate.html`; `curl -sI https://comforthomequote.com/gate.html` → 200; `curl -sI -H "Cookie: chq_preview=<HASH>" https://comforthomequote.com` → 200.
 4. Write `.github/workflows/deploy-web.yml`:
