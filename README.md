@@ -5,20 +5,16 @@ Design specs: docs/superpowers/specs/
 
 ## packages/pricing
 
-Deterministic estimate engine. Zero runtime deps.
+Deterministic pricing engine implementing the client's progressive band model
+(see docs/client/pricing-rules.md — INTERNAL; never render per-SQ rates in UI).
 
 ```ts
-import { computeEstimate, monthlyPayment } from '@chq/pricing';
-
-const estimate = computeEstimate(
-  { areaSqft: 2000, pitchDeg: 20, stories: 1, complexity: 'average', county: 'Hillsborough', hvhz: false },
-  { material: 'architectural', underlaymentUpgrade: false, ridgeVent: false, skylights: 0, gutterLf: 0, solarReady: false },
-);
-// estimate.low..estimate.high, estimate.lineItems, estimate.configVersion
-const payment = monthlyPayment(estimate.subtotal, 7.99, 120);
+import { configuredTotal, guarantee, estimatedMonthly } from '@chq/pricing';
+const total = configuredTotal(27.43, 'tamko-titan-xt', 'peel-stick'); // whole dollars
+const monthly = estimatedMonthly(total); // "$X/month (approximately)"
 ```
 
-Seed prices live in `packages/pricing/src/config/fl-defaults.json` — bump `version` on every change.
+Anchor prices from the client are locked in as golden tests.
 
 ## Live site
 

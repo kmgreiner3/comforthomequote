@@ -1,5 +1,8 @@
 export * from './types';
-export { defaultConfig } from './config';
-export { pitchClassFromDeg } from './pitch';
+export { SHINGLES, METAL, TILE } from './products';
+export {
+  roundUpDollars, priceShingle, titanUpgrade, peelStickUpgrade,
+  configuredTotal, guarantee, estimatedMonthly, cashPrice,
+  sqFromOutline, deckingAdjustment,
+} from './price';
 export { monthlyPayment } from './finance';
-export { computeEstimate } from './estimate';
