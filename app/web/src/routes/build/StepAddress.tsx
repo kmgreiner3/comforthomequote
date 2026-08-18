@@ -34,11 +34,11 @@ export default function StepAddress({ onContinue }: { onContinue: () => void }) 
 
       <RevealItem>
         <form onSubmit={handleSubmit} className="max-w-xl">
-          <label htmlFor="address" className="sr-only">
+          <label htmlFor="property-address" className="sr-only">
             Property address
           </label>
           <input
-            id="address"
+            id="property-address"
             name="address"
             type="text"
             autoComplete="off"

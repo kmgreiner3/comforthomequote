@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useBuild } from '../state/build';
 import PriceHero from '../components/PriceHero';
 import ProgressRail from './build/ProgressRail';
@@ -15,10 +15,6 @@ import StepIncluded from './build/StepIncluded';
 import StepFinishing from './build/StepFinishing';
 import StepReview from './build/StepReview';
 
-function go(id: StepId) {
-  window.location.hash = `#${id}`;
-}
-
 function goBack() {
   window.history.back();
 }
@@ -26,38 +22,62 @@ function goBack() {
 export default function Build() {
   // Subscribing to the whole store is deliberate: any field change can
   // unlock a further step (e.g. setOutline unlocking "shingle"), so the
-  // hash-sync effect below needs to re-run whenever the store changes.
+  // clamp-and-sync logic below needs to re-run whenever the store changes.
   const buildState = useBuild();
   const [currentId, setCurrentId] = useState<StepId>('address');
 
-  useEffect(() => {
-    function sync() {
-      const allowedIndex = maxAllowedIndex(useBuild.getState(), getStepFlags());
-      const requested = stepIdFromHash(window.location.hash);
-      // No hash at all (bare /build): resume at the furthest earned step
-      // rather than forcing back to address every load.
-      const requestedIndex = requested ? stepIndex(requested) : allowedIndex;
-      const finalIndex = Math.min(requestedIndex, allowedIndex);
-      const finalId = STEP_IDS[finalIndex]!;
+  // Deliberately never assigns `location.hash = ...`: that's a real
+  // navigation as far as the browser is concerned, and it triggers the
+  // native "scroll to the element whose id matches the fragment" behavior
+  // (this is exactly what caused the cold-load scroll-jump on Address,
+  // whose input id used to collide with the #address hash). The History
+  // API's pushState/replaceState update the URL bar without ever
+  // triggering that scroll-into-view, regardless of whether some future
+  // element id happens to collide with a step hash.
+  const applyStep = useCallback((desiredId: StepId | null, opts: { replace: boolean }) => {
+    const allowedIndex = maxAllowedIndex(useBuild.getState(), getStepFlags());
+    const desiredIndex = desiredId ? stepIndex(desiredId) : allowedIndex;
+    const finalIndex = Math.min(desiredIndex, allowedIndex);
+    const finalId = STEP_IDS[finalIndex]!;
 
-      if (window.location.hash !== `#${finalId}`) {
-        window.location.hash = `#${finalId}`;
-      }
-      setCurrentId(finalId);
+    if (window.location.hash !== `#${finalId}`) {
+      const url = `${window.location.pathname}${window.location.search}#${finalId}`;
+      if (opts.replace) window.history.replaceState(window.history.state, '', url);
+      else window.history.pushState(window.history.state, '', url);
     }
+    setCurrentId(finalId);
+  }, []);
 
-    sync();
-    window.addEventListener('hashchange', sync);
-    return () => window.removeEventListener('hashchange', sync);
+  // Initial mount, and whenever the store changes (a store update can
+  // unlock a further step): re-clamp against whatever's in the URL hash.
+  // Always a *replace* -- this is normalizing/redirecting, not a user
+  // navigation, so it shouldn't create a Back-able history entry.
+  useEffect(() => {
+    applyStep(stepIdFromHash(window.location.hash), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildState]);
+  }, [buildState, applyStep]);
 
-  // Hash-only navigation doesn't reload the page, so the browser keeps
+  // Browser Back/Forward (including window.history.back() below) fires
+  // popstate; re-read the hash the browser already navigated to and clamp.
+  useEffect(() => {
+    function onPopState() {
+      applyStep(stepIdFromHash(window.location.hash), { replace: true });
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [applyStep]);
+
+  // Step-to-step navigation doesn't reload the page, so the browser keeps
   // whatever scroll position the previous step left behind. Each step is a
   // fresh "screen" and should always open at the top.
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [currentId]);
+
+  function goToStep(id: StepId) {
+    // push: a real forward decision, so it creates a Back-able entry.
+    applyStep(id, { replace: false });
+  }
 
   const isReview = currentId === 'review';
 
@@ -73,7 +93,7 @@ export default function Build() {
           data-testid="build-step"
           data-step={currentId}
         >
-          <StepTransition stepKey={currentId}>{renderStep(currentId)}</StepTransition>
+          <StepTransition stepKey={currentId}>{renderStep(currentId, goToStep)}</StepTransition>
         </main>
       </div>
       {!isReview && <PriceHero />}
@@ -81,22 +101,22 @@ export default function Build() {
   );
 }
 
-function renderStep(id: StepId) {
+function renderStep(id: StepId, goToStep: (id: StepId) => void) {
   switch (id) {
     case 'address':
-      return <StepAddress onContinue={() => go('home')} />;
+      return <StepAddress onContinue={() => goToStep('home')} />;
     case 'home':
-      return <StepHome onContinue={() => go('shingle')} onBack={goBack} />;
+      return <StepHome onContinue={() => goToStep('shingle')} onBack={goBack} />;
     case 'shingle':
-      return <StepShingle onContinue={() => go('color')} onBack={goBack} />;
+      return <StepShingle onContinue={() => goToStep('color')} onBack={goBack} />;
     case 'color':
-      return <StepColor onContinue={() => go('underlayment')} onBack={goBack} />;
+      return <StepColor onContinue={() => goToStep('underlayment')} onBack={goBack} />;
     case 'underlayment':
       return (
         <StepUnderlayment
           onContinue={() => {
             setStepFlagDone('underlayment');
-            go('protection');
+            goToStep('protection');
           }}
           onBack={goBack}
         />
@@ -106,7 +126,7 @@ function renderStep(id: StepId) {
         <StepProtection
           onContinue={() => {
             setStepFlagDone('protection');
-            go('included');
+            goToStep('included');
           }}
           onBack={goBack}
         />
@@ -116,15 +136,15 @@ function renderStep(id: StepId) {
         <StepIncluded
           onContinue={() => {
             setStepFlagDone('included');
-            go('finishing');
+            goToStep('finishing');
           }}
           onBack={goBack}
         />
       );
     case 'finishing':
-      return <StepFinishing onContinue={() => go('review')} onBack={goBack} />;
+      return <StepFinishing onContinue={() => goToStep('review')} onBack={goBack} />;
     case 'review':
-      return <StepReview onEdit={() => go('shingle')} />;
+      return <StepReview onEdit={() => goToStep('shingle')} />;
     default:
       return null;
   }
