@@ -1,55 +1,21 @@
-export type Material = 'threeTab' | 'architectural' | 'metal' | 'tile';
-export type PitchClass = 'walkable' | 'steep' | 'verySteep';
-export type Complexity = 'simple' | 'average' | 'cutUp';
+export type ShingleKey = 'iko-cambridge' | 'tamko-titan-xt';
+export type Underlayment = 'synthetic' | 'peel-stick';
+export type ProtectionLevel = 'BETTER' | 'BETTER+' | 'BEST' | 'BEST+';
 
-export interface RoofInput {
-  areaSqft: number;      // total roof surface area, sq ft
-  pitchDeg: number;      // dominant pitch, degrees
-  stories: 1 | 2 | 3;
-  complexity: Complexity;
-  county: string;        // e.g. "Hillsborough"; unknown counties use config default
-  hvhz: boolean;         // Miami-Dade / Broward high-velocity hurricane zone
+export interface Band {
+  upToSq: number;    // band covers (previous upToSq, upToSq]
+  ratePerSq: number; // marginal rate for that portion only
 }
 
-export interface Selections {
-  material: Material;
-  underlaymentUpgrade: boolean;
-  ridgeVent: boolean;
-  skylights: number;     // count, ≥ 0
-  gutterLf: number;      // linear feet, ≥ 0
-  solarReady: boolean;
-}
-
-export interface LineItem {
-  key: string;           // stable id: materials|labor|underlayment|ridgeVent|skylights|gutters|solarReady|permit|disposal
-  label: string;         // display text
-  amount: number;        // whole USD
-}
-
-export interface Estimate {
-  configVersion: string;
-  squares: number;       // roofing squares incl. waste, 1 decimal
-  lineItems: LineItem[];
-  subtotal: number;      // whole USD, sum of line items
-  low: number;           // subtotal - band, rounded to $100
-  high: number;          // subtotal + band, rounded to $100
-}
-
-export interface PricingConfig {
-  version: string;
-  wastePct: Record<Complexity, number>;          // integer %
-  materialPerSquare: Record<Material, number>;   // material-only $/square
-  laborPerSquare: Record<PitchClass, number>;    // $/square
-  storiesFactorPct: Record<'1' | '2' | '3', number>; // integer %, 100 = ×1.0
-  pitchBreaksDeg: { steepFrom: number; verySteepFrom: number };
-  permitByCounty: Record<string, number> & { default: number }; // must include "default"
-  hvhzPct: number;                               // integer %
-  disposalPerSquare: number;
-  underlaymentUpgradePerSquare: number;
-  ridgeVentFlat: number;
-  perSkylight: number;
-  gutterPerLf: number;
-  solarReadyFlat: number;
-  marginPct: number;                             // integer %
-  bandPct: number;                               // integer %, estimate range ±
+export interface ShingleProduct {
+  key: ShingleKey;
+  name: string;
+  tier: 'BETTER' | 'BEST';
+  tagline: string;
+  highlights: string[];
+  minimumSq: number;     // roofs at or below this size pay minimumPrice
+  minimumPrice: number;
+  bands: Band[];         // ascending upToSq, starting above minimumSq
+  colors: string[];
+  workmanshipYears: Record<Underlayment, number>;
 }
