@@ -213,7 +213,7 @@ export default function Metal() {
             href="mailto:dylannadeau2@gmail.com?subject=Metal%20roof%20quote%20request"
             className="mt-6 inline-flex min-h-[44px] items-center justify-center rounded-full bg-blue-600 px-8 py-3.5 text-base font-semibold text-white transition-colors duration-200 hover:bg-blue-500"
           >
-            Email quotes@comforthomequote.com
+            Email us for a custom quote
           </a>
 
           <p className="mt-5 rounded-xl border border-amber-400/40 bg-amber-400/15 px-4 py-3 text-sm font-medium text-white/90">
