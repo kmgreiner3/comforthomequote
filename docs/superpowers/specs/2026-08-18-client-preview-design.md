@@ -31,6 +31,15 @@ Ship the real ComfortHomeQuote site — configurator + marketing pages — to ht
 - **Layout:** generous negative space on light sections; the roofline arc from the logo echoed as a section-divider SVG motif; selection cards with strong borders (2px navy) that flip to blue fill + check on selection; INCLUDED tiles as a dense responsive grid with line icons.
 - **Logo:** `logo/*.png` optimized (webp + trimmed) for header + gate + favicon.
 
+## Structural reference (Kyle, 2026-08-18): thezebra.com/car-insurance-quotes
+
+Model the site structure on The Zebra's quote-start pattern:
+- **Hero = one input + one CTA.** Full-width hero with a single address field and [BUILD MY ROOF]. One benefit-led headline, one trust sub-line ("No name, phone, or email needed to see your price."). Nothing else competes.
+- **Trust strip directly under the hero:** 3 short proof points (no lead gate / real local contractor / price updates live).
+- **How-it-works as 3 numbered steps,** then short education sections below the fold (why materials matter, what's included, financing), each scannable with a small heading and 2-3 lines max.
+- **Wizard = one decision per screen,** big tap targets, visible progress, friendly direct microcopy ("Got it. Let's pick your shingle."). Sticky CTA/price always visible.
+- **Copy tone:** short, direct, benefit-first sentences. No walls of text, no em dashes, minimal adjectives.
+
 ## Architecture
 
 - `app/web`: React 18 + Vite + TypeScript + Tailwind CSS v4 + react-router + zustand (persist) + motion. Routes: `/` (landing), `/build` (wizard: address → home-size → shingle → color → underlayment → protection → included → finishing → review), `/next` (partner → info → schedule → confirmation, demo mode), `/about`, `/metal`.
