@@ -80,13 +80,18 @@ const initialState: PersistedFields = {
 
 export const useBuild = create<BuildState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       ...initialState,
 
       setAddress: (a) => set({ address: a }),
       setOutline: (sqft) => set({ outlineSqft: sqft, sq: sqFromOutline(sqft) }),
-      // Changing shingle resets color: the two products have different color lists.
-      setShingle: (k) => set({ shingle: k, color: null }),
+      // Changing shingle resets color: the two products have different color
+      // lists. Re-selecting the *same* shingle is a no-op -- it must not
+      // wipe a color the user already chose.
+      setShingle: (k) => {
+        if (get().shingle === k) return;
+        set({ shingle: k, color: null });
+      },
       setColor: (c) => set({ color: c }),
       setUnderlayment: (u) => set({ underlayment: u }),
       setDripEdge: (c) => set({ dripEdge: c }),

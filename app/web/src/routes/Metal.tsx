@@ -149,8 +149,8 @@ export default function Metal() {
           </div>
 
           <p className="mt-6 text-base leading-relaxed text-ink/80">
-            Standing seam projects typically start around $800 per square for larger roofs. Every
-            metal roof is quoted custom.
+            Standing seam pricing depends on your roof&apos;s shape, pitch, and panel profile.
+            Every metal roof is quoted custom.
           </p>
 
           <p className="mt-4 text-xs leading-relaxed text-ink/50">
@@ -208,8 +208,9 @@ export default function Metal() {
         <div className="mx-auto max-w-xl">
           <h2 className="font-display text-2xl font-semibold md:text-3xl">Want a metal or tile quote? Email us.</h2>
 
+          {/* TODO: swap to quotes@comforthomequote.com once domain mail (SES/forwarding) exists. */}
           <a
-            href="mailto:quotes@comforthomequote.com?subject=Metal%20roof%20quote%20request"
+            href="mailto:dylannadeau2@gmail.com?subject=Metal%20roof%20quote%20request"
             className="mt-6 inline-flex min-h-[44px] items-center justify-center rounded-full bg-blue-600 px-8 py-3.5 text-base font-semibold text-white transition-colors duration-200 hover:bg-blue-500"
           >
             Email quotes@comforthomequote.com

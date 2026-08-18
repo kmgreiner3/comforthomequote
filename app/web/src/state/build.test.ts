@@ -51,6 +51,16 @@ describe('useBuild store actions', () => {
     expect(useBuild.getState().color).toBeNull();
   });
 
+  it('setShingle is a no-op when re-selecting the already-chosen shingle (keeps color)', () => {
+    useBuild.getState().setShingle('iko-cambridge');
+    useBuild.getState().setColor('Dual Black');
+
+    useBuild.getState().setShingle('iko-cambridge');
+
+    expect(useBuild.getState().shingle).toBe('iko-cambridge');
+    expect(useBuild.getState().color).toBe('Dual Black');
+  });
+
   it('defaults underlayment to synthetic', () => {
     expect(useBuild.getState().underlayment).toBe('synthetic');
   });

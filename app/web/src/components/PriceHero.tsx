@@ -109,7 +109,7 @@ export default function PriceHero() {
           {monthlyLabel && <p className="text-xs text-white/70">{monthlyLabel}*</p>}
         </div>
         <Link
-          to="/build"
+          to="/build#review"
           className="shrink-0 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
         >
           Review

@@ -30,7 +30,7 @@ export default function StepReview({ onEdit }: { onEdit: () => void }) {
   const state = useBuild();
   const navigate = useNavigate();
 
-  const { shingle, color, underlayment, dripEdge } = state;
+  const { address, shingle, color, underlayment, dripEdge } = state;
   if (shingle == null || color == null || dripEdge == null) return null; // shouldn't render: gated behind full config
 
   const total = selectTotal(state);
@@ -53,6 +53,7 @@ export default function StepReview({ onEdit }: { onEdit: () => void }) {
       <RevealItem className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <div className="rounded-2xl border-2 border-navy-950/10 bg-white p-6">
+            {address && <SummaryRow label="Property" value={address} />}
             <SummaryRow label="System" value={SHINGLES[shingle].name} />
             <SummaryRow label="Color" value={color} />
             <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY[underlayment]} />
@@ -82,7 +83,7 @@ export default function StepReview({ onEdit }: { onEdit: () => void }) {
             <p className="mt-2 font-display text-4xl font-semibold tabular-nums">{usd(total)}</p>
             <p className="mt-1 text-sm text-white/70">or approximately {perMonth(monthly)}*</p>
             <p className="mt-4 border-t border-white/10 pt-4 text-sm text-white/80">
-              Pay cash: {usd(cash)} (5% discount)
+              Pay cash: {usd(cash)} (5% discount, half upfront and half on completion)
             </p>
           </div>
 
