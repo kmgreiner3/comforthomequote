@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Preview access - Comfort Home Quote</title>
+<style>
+  :root {
+    --navy-950: #0f1b33;
+    --navy-800: #1d2e52;
+    --blue-600: #2563c9;
+    --blue-500: #3b82e8;
+    --sky-50: #f2f6fc;
+    --amber-400: #f5a623;
+    --ink: #101828;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 50% 0%, var(--navy-800) 0%, var(--navy-950) 60%);
+    font-family: "Bricolage Grotesque", "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--sky-50);
+    padding: 24px;
+  }
+
+  main {
+    width: 100%;
+    max-width: 380px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .logo {
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #ffffff;
+  }
+
+  p.tagline {
+    margin: 0 0 32px;
+    font-size: 0.95rem;
+    color: rgba(242, 246, 252, 0.7);
+    line-height: 1.5;
+  }
+
+  form {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  input[type="password"] {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(242, 246, 252, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  input[type="password"]::placeholder {
+    color: rgba(242, 246, 252, 0.4);
+  }
+
+  input[type="password"]:focus {
+    border-color: var(--blue-500);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  input[type="password"].shake {
+    animation: shake 0.4s ease;
+    border-color: #e5484d;
+  }
+
+  button {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: none;
+    background: var(--blue-600);
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.05s ease;
+  }
+
+  button:hover {
+    background: var(--blue-500);
+  }
+
+  button:active {
+    transform: translateY(1px);
+  }
+
+  .error {
+    min-height: 20px;
+    margin-top: 4px;
+    font-size: 0.875rem;
+    color: #ff9b9e;
+    visibility: hidden;
+  }
+
+  .error.visible {
+    visibility: visible;
+  }
+
+  footer {
+    margin-top: 40px;
+    font-size: 0.75rem;
+    color: rgba(242, 246, 252, 0.35);
+  }
+
+  @keyframes shake {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-4px); }
+    40%, 60% { transform: translateX(4px); }
+  }
+</style>
+</head>
+<body>
+  <main>
+    <img class="logo" alt="Comfort Home Quote" src="data:image/png;base64,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" />
+    <h1>Preview access</h1>
+    <p class="tagline">This site is a private preview of Comfort Home Quote. Enter the password to continue.</p>
+    <form id="gate-form" autocomplete="off">
+      <input id="password" name="password" type="password" placeholder="Password" autofocus />
+      <button type="submit">Enter</button>
+      <div id="error" class="error">That's not it. Check with Kyle or Dylan.</div>
+    </form>
+    <footer>Comfort Home Quote preview build</footer>
+  </main>
+
+  <script>
+    (function () {
+      var HASH = 'b70d2be5bb01a795017cc1d88adccb18a3c6f93dd0ce564a514affab1b432a5d';
+      var form = document.getElementById('gate-form');
+      var input = document.getElementById('password');
+      var error = document.getElementById('error');
+
+      function toHex(buffer) {
+        var bytes = new Uint8Array(buffer);
+        var hex = '';
+        for (var i = 0; i < bytes.length; i++) {
+          var h = bytes[i].toString(16);
+          hex += h.length === 1 ? '0' + h : h;
+        }
+        return hex;
+      }
+
+      function showError() {
+        error.classList.add('visible');
+        input.classList.remove('shake');
+        // force reflow so the animation can replay on repeated wrong attempts
+        void input.offsetWidth;
+        input.classList.add('shake');
+      }
+
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var value = input.value || '';
+
+        if (!window.crypto || !window.crypto.subtle) {
+          showError();
+          return;
+        }
+
+        var encoder = new TextEncoder();
+        var data = encoder.encode(value);
+        window.crypto.subtle.digest('SHA-256', data).then(function (digest) {
+          var hex = toHex(digest);
+          if (hex === HASH) {
+            document.cookie = 'chq_preview=' + hex + '; Max-Age=2592000; Path=/; Secure; SameSite=Lax';
+            location.replace('/');
+          } else {
+            showError();
+          }
+        }).catch(function () {
+          showError();
+        });
+      });
+
+      input.addEventListener('animationend', function () {
+        input.classList.remove('shake');
+      });
+
+      input.addEventListener('input', function () {
+        error.classList.remove('visible');
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,3 +1,10 @@
+resource "aws_cloudfront_function" "gate" {
+  name    = "chq-preview-gate"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = file("${path.module}/gate-function.js")
+}
+
 resource "aws_cloudfront_origin_access_control" "site" {
   name                              = "chq-site-oac"
   origin_access_control_origin_type = "s3"
@@ -27,6 +34,11 @@ resource "aws_cloudfront_distribution" "site" {
     compress               = true
     # AWS managed policy: CachingOptimized
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.gate.arn
+    }
   }
 
   # SPA routing (Plan 4): unknown paths fall through to index.html
