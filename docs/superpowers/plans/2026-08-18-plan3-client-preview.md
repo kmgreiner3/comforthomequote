@@ -13,7 +13,7 @@
 - **Never render per-SQ rates, band tables, or formulas in the UI.** Customer sees totals, `+$X,XXX` deltas, and "approximately $X/month" only. No cents, ever (`$12,000`, never `$12,000.00`).
 - All money display comes from `@chq/pricing` v2 — no arithmetic in components.
 - Client anchor prices are golden: IKO 5/10/24/35/50/65/80/100 SQ → 4750/7000/12000/16800/22500/27750/32625/38625; Titan → 5000/7500/13200/18400/25000/31000/36625/43625. Final prices ALWAYS round UP to whole dollars.
-- Copy comes from `docs/client/website-copy.md`. Keep the client's voice and facts, but apply Kyle's style rules: **never use em dashes anywhere in user-facing text** (rewrite as two sentences or use a comma), keep text concise and scannable (trim long paragraphs to their point, prefer short lines, no screen should feel like reading), and when polish competes with simplicity, choose simple. Wind-warranty language stays exactly as written (legal); footnote required on pages with warranty/financing claims.
+- Copy comes from `docs/client/website-copy.md`. Keep the client's voice and facts, but apply Kyle's style rules: **never use em dashes anywhere in user-facing text** (rewrite as two sentences or use a comma), keep text concise and scannable (trim long paragraphs to their point, prefer short lines, no screen should feel like reading), and when polish competes with simplicity, choose simple. **No emojis anywhere on the site.** Clean and professional, in the spirit of thezebra.com. Wind-warranty language stays exactly as written (legal); footnote required on pages with warranty/financing claims.
 - Design tokens (CSS vars, exact): `--navy-950:#0F1B33; --navy-800:#1D2E52; --blue-600:#2563C9; --blue-500:#3B82E8; --sky-50:#F2F6FC; --amber-400:#F5A623; --ink:#101828`. Fonts: Bricolage Grotesque (display + price, tabular numerals), Public Sans (body), both self-hosted via @fontsource-variable. No external network requests from the page (fonts/images all local).
 - Mobile-first: sticky bottom price bar < 768px, persistent top-right price card ≥ 768px. Respect `prefers-reduced-motion`.
 - Address-only before the "I'm Ready" step; contact fields only after. Demo-mode notice on info/schedule steps ("Preview build — submissions aren't saved yet").
@@ -168,9 +168,9 @@ Run: `npm test -w @chq/pricing` — Expected: FAIL, cannot resolve `../src/price
 `packages/pricing/src/round.ts`:
 ```ts
 // Client rule 7: final prices ALWAYS round up to the nearest whole dollar.
-// The epsilon keeps exact-dollar floats (e.g. 13061.000000000002) from bumping up.
+// The epsilon keeps exact-dollar floats (e.g. 18400.000001 from band math) from bumping up.
 export function roundUpDollars(x: number): number {
-  return Math.ceil(x - 1e-7);
+  return Math.ceil(x - 1e-6);
 }
 ```
 
