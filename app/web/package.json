@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "walkthrough": "node scripts/walkthrough.mjs"
   },
   "dependencies": {
     "@chq/pricing": "*",
@@ -26,6 +27,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
+    "playwright": "^1.49.0",
     "tailwindcss": "^4.0.0",
     "vite": "^7.0.0"
   }

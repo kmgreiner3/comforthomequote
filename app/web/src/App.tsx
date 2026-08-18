@@ -2,6 +2,7 @@ import { Routes, Route, useLocation } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import PriceHero from './components/PriceHero';
+import Build from './routes/Build';
 
 function Placeholder({ title, note }: { title: string; note: string }) {
   return (
@@ -14,10 +15,6 @@ function Placeholder({ title, note }: { title: string; note: string }) {
 
 function Home() {
   return <Placeholder title="Comfort Home Quote" note="A quote from the comfort of your home." />;
-}
-
-function Build() {
-  return <Placeholder title="Build My Roof" note="Answer a few questions to see your price update live." />;
 }
 
 function Next() {
@@ -34,7 +31,10 @@ function Metal() {
 
 export default function App() {
   const location = useLocation();
-  const showPriceHero = location.pathname === '/build' || location.pathname === '/next';
+  // /build renders its own PriceHero (it needs to hide on the review step,
+  // where the price is already the centerpiece of the page and a floating
+  // duplicate would overlap the primary CTA).
+  const showPriceHero = location.pathname === '/next';
 
   return (
     <div className="flex min-h-screen flex-col">
