@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/public-sans";
+
+@theme {
+  /* Brand colors (exact tokens, see docs/superpowers/specs) */
+  --color-navy-950: #0f1b33;
+  --color-navy-800: #1d2e52;
+  --color-blue-600: #2563c9;
+  --color-blue-500: #3b82e8;
+  --color-sky-50: #f2f6fc;
+  --color-amber-400: #f5a623;
+  --color-ink: #101828;
+
+  /* Fonts, self-hosted via @fontsource-variable, no external requests */
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Public Sans Variable", "Public Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background-color: var(--color-sky-50);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+}
+
+/* Prices always use tabular (fixed-width) numerals so digits don't jitter
+   as they animate/update. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
