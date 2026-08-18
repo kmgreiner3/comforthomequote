@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Playwright walkthrough for the configurator wizard (Task 4) plus the
-// landing page, About page, and post-acceptance demo flow (Task 5).
+// Playwright walkthrough for the configurator wizard (Task 4), the landing
+// page, About page, and post-acceptance demo flow (Task 5), and the Metal &
+// Tile education page (Task 6).
 //
 // Builds `app/web`, serves the built `dist/` with `vite preview`, then:
 //
@@ -27,10 +28,14 @@
 //   4. On fresh contexts (per width), verifies the landing page's address
 //      input navigates to /build with the address pre-filled (landing on
 //      the home-size step, not the address step), then loads /about.
+//   5. On fresh contexts (per width), loads /metal; on the 1280 pass, opens
+//      the Lightbox on flyer-1, screenshots it, closes it via Escape, and
+//      asserts body scroll (locked while the Lightbox is open) is restored.
 //
 // Screenshots every /build step at 390x844 and 1280x800 (plus one extra:
 // the shingle step mid-selection on mobile), every /next step at both
-// widths, and the landing/about pages at both widths, all into
+// widths, the landing/about pages at both widths, and the /metal page at
+// both widths (plus the open lightbox at 1280x800), all into
 // .superpowers/sdd/screens/.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -241,6 +246,47 @@ async function checkLandingAndAbout(browser, width, height) {
   await context.close();
 }
 
+// /metal (Task 6): fresh context per width. Screenshots the page, then on
+// the 1280 pass opens the Lightbox on flyer-1, screenshots it, closes via
+// Escape, and asserts body scroll (locked while open) is restored after.
+async function checkMetal(browser, width, height) {
+  const context = await browser.newContext({ viewport: { width, height } });
+  const page = await context.newPage();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+
+  await page.goto(`${BASE_URL}/metal`);
+  await page.waitForSelector('[data-testid="metal-page"]');
+  await screenshotNamed(page, 'metal', width);
+
+  if (width === 1280) {
+    const overflowBefore = await page.evaluate(() => document.body.style.overflow);
+
+    await page.locator('[data-testid="flyer-1"]').click();
+    await page.waitForSelector('[data-testid="lightbox"]');
+    await screenshotNamed(page, 'metal-lightbox', width);
+
+    const overflowLocked = await page.evaluate(() => document.body.style.overflow);
+    if (overflowLocked !== 'hidden') {
+      fail(
+        `[metal @ ${width}x${height}] expected body scroll locked (overflow: hidden) while lightbox open, got "${overflowLocked}"`
+      );
+    }
+
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-testid="lightbox"]', { state: 'detached' });
+
+    const overflowAfter = await page.evaluate(() => document.body.style.overflow);
+    if (overflowAfter !== overflowBefore) {
+      fail(
+        `[metal @ ${width}x${height}] expected body scroll restored after Escape (was "${overflowBefore}"), got "${overflowAfter}"`
+      );
+    }
+    console.log(`  [metal @ ${width}x${height}] lightbox open (flyer-1) -> Escape close -> body scroll restored`);
+  }
+
+  await context.close();
+}
+
 async function main() {
   fs.mkdirSync(SCREENS_DIR, { recursive: true });
 
@@ -398,6 +444,12 @@ async function main() {
     console.log('\nLanding + About: fresh-context address prefill and screenshots...');
     await checkLandingAndAbout(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
     await checkLandingAndAbout(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
+
+    // --- Metal & Tile education page: fresh contexts, both widths, plus the
+    //     Lightbox open/close + scroll-lock check on the 1280 pass ---
+    console.log('\nMetal & Tile: /metal screenshots + Lightbox open/close check...');
+    await checkMetal(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
+    await checkMetal(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
     await browser.close();
     console.log('\nAll assertions passed. Walkthrough complete.');
