@@ -1,6 +1,7 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import PriceHero from './components/PriceHero';
 
 function Placeholder({ title, note }: { title: string; note: string }) {
   return (
@@ -32,6 +33,9 @@ function Metal() {
 }
 
 export default function App() {
+  const location = useLocation();
+  const showPriceHero = location.pathname === '/build' || location.pathname === '/next';
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -45,6 +49,7 @@ export default function App() {
         </Routes>
       </div>
       <Footer />
+      {showPriceHero && <PriceHero />}
     </div>
   );
 }
