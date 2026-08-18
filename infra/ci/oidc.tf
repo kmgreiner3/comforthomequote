@@ -34,7 +34,13 @@ data "aws_iam_policy_document" "assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:kmgreiner3/comforthomequote:ref:refs/heads/main"]
+      # GitHub mints subs in both classic and immutable-ID forms depending on
+      # rollout state; accept exactly this repo's main branch in either form.
+      # The @IDs pin owner/repo identity across renames (repos/{owner}/{repo} API ids).
+      values = [
+        "repo:kmgreiner3/comforthomequote:ref:refs/heads/main",
+        "repo:kmgreiner3@164082937/comforthomequote@1332689649:ref:refs/heads/main",
+      ]
     }
   }
 }
