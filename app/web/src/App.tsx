@@ -1,8 +1,10 @@
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
-import PriceHero from './components/PriceHero';
+import Landing from './routes/Landing';
 import Build from './routes/Build';
+import Next from './routes/Next';
+import About from './routes/About';
 
 function Placeholder({ title, note }: { title: string; note: string }) {
   return (
@@ -13,35 +15,22 @@ function Placeholder({ title, note }: { title: string; note: string }) {
   );
 }
 
-function Home() {
-  return <Placeholder title="Comfort Home Quote" note="A quote from the comfort of your home." />;
-}
-
-function Next() {
-  return <Placeholder title="You're Ready" note="Let's get your project scheduled." />;
-}
-
-function About() {
-  return <Placeholder title="About Comfort Home Quote" note="Your roof. Your research. Your decision." />;
-}
-
 function Metal() {
   return <Placeholder title="Roofing Options" note="Explore metal and tile roofing systems." />;
 }
 
 export default function App() {
-  const location = useLocation();
   // /build renders its own PriceHero (it needs to hide on the review step,
   // where the price is already the centerpiece of the page and a floating
-  // duplicate would overlap the primary CTA).
-  const showPriceHero = location.pathname === '/next';
-
+  // duplicate would overlap the primary CTA). /next never shows it: the
+  // post-acceptance flow isn't configuration, and the price appears in the
+  // confirmation summary instead.
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
       <div className="flex-1">
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<Landing />} />
           <Route path="/build" element={<Build />} />
           <Route path="/next" element={<Next />} />
           <Route path="/about" element={<About />} />
@@ -49,7 +38,6 @@ export default function App() {
         </Routes>
       </div>
       <Footer />
-      {showPriceHero && <PriceHero />}
     </div>
   );
 }

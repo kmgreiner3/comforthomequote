@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Playwright walkthrough for the configurator wizard (Task 4 verification).
+// Playwright walkthrough for the configurator wizard (Task 4) plus the
+// landing page, About page, and post-acceptance demo flow (Task 5).
 //
 // Builds `app/web`, serves the built `dist/` with `vite preview`, then:
 //
@@ -17,10 +18,20 @@
 //      (a cache-busting query param forces a real navigation rather than
 //      an in-document fragment-only jump, since the state is already
 //      earned in localStorage from the mobile pass).
+//   3. From that same 1280x800 review page, clicks "I'm Ready to Move
+//      Forward" and walks the post-acceptance demo flow (partner -> info
+//      -> schedule -> confirmation), filling demo values along the way and
+//      asserting the confirmation screen shows $14,400 and the scheduled
+//      visit date. Re-walks each /next step at 390x844 via fresh page loads
+//      (state already earned in localStorage from the 1280 walk).
+//   4. On fresh contexts (per width), verifies the landing page's address
+//      input navigates to /build with the address pre-filled (landing on
+//      the home-size step, not the address step), then loads /about.
 //
-// Screenshots every step at 390x844 and 1280x800 into
-// .superpowers/sdd/screens/ (plus one extra: the shingle step mid-selection
-// on mobile).
+// Screenshots every /build step at 390x844 and 1280x800 (plus one extra:
+// the shingle step mid-selection on mobile), every /next step at both
+// widths, and the landing/about pages at both widths, all into
+// .superpowers/sdd/screens/.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +56,8 @@ const STEPS = [
   { n: 8, id: 'finishing' },
   { n: 9, id: 'review' },
 ];
+
+const NEXT_STEPS = ['partner', 'info', 'schedule', 'confirm'];
 
 const VIEWPORTS = [
   { width: 390, height: 844 },
@@ -81,10 +94,47 @@ async function waitForStep(page, id, timeoutMs = 3000) {
   );
 }
 
+async function waitForNextStep(page, id, timeoutMs = 3000) {
+  await page.waitForFunction(
+    (expected) => document.querySelector('[data-testid="next-step"]')?.getAttribute('data-step') === expected,
+    id,
+    { timeout: timeoutMs }
+  );
+}
+
 async function screenshotStep(page, step, width, suffix = '') {
   const file = path.join(SCREENS_DIR, `step-${step.n}-${step.id}${suffix}-${width}.png`);
   await page.screenshot({ path: file });
   console.log(`  screenshot: ${path.relative(REPO_ROOT, file)}`);
+}
+
+async function screenshotNamed(page, name, width) {
+  const file = path.join(SCREENS_DIR, `${name}-${width}.png`);
+  await page.screenshot({ path: file });
+  console.log(`  screenshot: ${path.relative(REPO_ROOT, file)}`);
+}
+
+// Local-date arithmetic (no UTC shifting): mirrors StepSchedule's own
+// `toISODate` so the test picks a date the component will actually accept.
+function isoDatePlusDays(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Mirrors StepConfirm's own `formatVisitDate` exactly, so the assertion
+// checks for precisely the string the component renders.
+function formatVisitDateJS(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 }
 
 async function assertColdLoadTop(page, label) {
@@ -130,6 +180,17 @@ async function assertReviewPrice(page, label) {
   console.log(`  [${label}] verified $14,400 and $144/month on review page`);
 }
 
+async function assertConfirmation(page, label, expectedDateText) {
+  const bodyText = await page.locator('body').innerText();
+  if (!bodyText.includes('$14,400')) {
+    fail(`[${label}] Confirmation did not show $14,400. Page text:\n${bodyText}`);
+  }
+  if (!bodyText.includes(expectedDateText)) {
+    fail(`[${label}] Confirmation did not show visit date "${expectedDateText}". Page text:\n${bodyText}`);
+  }
+  console.log(`  [${label}] verified $14,400 and visit date "${expectedDateText}" on confirmation page`);
+}
+
 // Reproduces the reported bug directly: a brand new context (so localStorage
 // is empty -- lands on #address) loading a URL that already contains the
 // #address fragment, exactly like a bookmark, shared link, or reload would.
@@ -140,6 +201,43 @@ async function checkColdAddressLoad(browser, width, height) {
   await page.goto(`${BASE_URL}/build#address`);
   await waitForStep(page, 'address');
   await assertColdLoadTop(page, `cold /build#address @ ${width}x${height}`);
+  await context.close();
+}
+
+// Fresh context per width (no earned config from the main wizard walk):
+// verifies the landing page's single address input stores the address and
+// navigates to /build landing on the home-size step (address already
+// satisfied), not the address step. Also screenshots landing and About.
+async function checkLandingAndAbout(browser, width, height) {
+  const context = await browser.newContext({ viewport: { width, height } });
+  const page = await context.newPage();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+
+  await page.goto(BASE_URL);
+  await page.waitForSelector('#landing-address');
+  await screenshotNamed(page, 'landing', width);
+
+  const testAddress = '456 Ocean Dr, Miami, FL';
+  await page.getByLabel('Property address').fill(testAddress);
+  await page.getByRole('button', { name: 'Build My Roof' }).click();
+  await waitForStep(page, 'home');
+
+  const storedAddress = await page.evaluate(() => {
+    const raw = window.localStorage.getItem('chq-build-v1');
+    if (!raw) return null;
+    return JSON.parse(raw)?.state?.address ?? null;
+  });
+  if (storedAddress !== testAddress) {
+    fail(
+      `[landing @ ${width}x${height}] expected /build to land on 'home' with address "${testAddress}" prefilled, got stored address "${storedAddress}"`
+    );
+  }
+  console.log(`  [landing @ ${width}x${height}] address prefill -> /build (home step) verified`);
+
+  await page.goto(`${BASE_URL}/about`);
+  await page.waitForSelector('article');
+  await screenshotNamed(page, 'about', width);
+
   await context.close();
 }
 
@@ -252,6 +350,54 @@ async function main() {
       await screenshotStep(page, step, 1280);
     }
     await assertReviewPrice(page, '1280 desktop (fresh loads)');
+
+    // --- Post-acceptance demo flow: continue on the same 1280x800 page,
+    //     which is already sitting on /build#review. Walking partner -> info
+    //     -> schedule -> confirmation, screenshotting each step on arrival. ---
+    console.log("\nPost-acceptance flow (1280x800): I'm Ready -> partner -> info -> schedule -> confirmation...");
+    await page.getByRole('button', { name: "I'm Ready to Move Forward" }).click();
+
+    await waitForNextStep(page, 'partner');
+    await screenshotNamed(page, 'next-partner', 1280);
+    await page.getByRole('button', { name: 'Continue My Project' }).click();
+
+    await waitForNextStep(page, 'info');
+    await screenshotNamed(page, 'next-info', 1280);
+    await page.locator('#info-name').fill('Jamie Homeowner');
+    await page.locator('#info-phone').fill('8135550100');
+    await page.locator('#info-email').fill('jamie@example.com');
+    await page.locator('#info-billing').fill('789 Bay St, Tampa, FL');
+    await page.selectOption('#info-method', 'Phone');
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    await waitForNextStep(page, 'schedule');
+    await screenshotNamed(page, 'next-schedule', 1280);
+    const visitDateISO = isoDatePlusDays(10); // safely more than the 7-day minimum
+    await page.locator('#visit-date').fill(visitDateISO);
+    await page.getByText('Morning', { exact: true }).click();
+    await page.getByRole('button', { name: 'Schedule My Visit' }).click();
+
+    await waitForNextStep(page, 'confirm');
+    await screenshotNamed(page, 'next-confirm', 1280);
+    const expectedVisitDateText = formatVisitDateJS(visitDateISO);
+    await assertConfirmation(page, '1280 confirmation', expectedVisitDateText);
+
+    // --- 390 pass over /next: state (contact, visit, accepted) is already
+    //     earned in localStorage, so each step gets a genuine fresh page
+    //     load, same cache-busting technique as the /build desktop pass. ---
+    console.log('\n/next 390x844 pass: fresh full page load per step...');
+    await page.setViewportSize(VIEWPORTS[0]);
+    for (const id of NEXT_STEPS) {
+      await page.goto(`${BASE_URL}/next?cb=${Date.now()}-${id}#${id}`, { waitUntil: 'domcontentloaded' });
+      await waitForNextStep(page, id);
+      await screenshotNamed(page, `next-${id}`, 390);
+    }
+    await assertConfirmation(page, '390 confirmation (fresh load)', expectedVisitDateText);
+
+    // --- Landing + About: fresh contexts (no earned config), both widths ---
+    console.log('\nLanding + About: fresh-context address prefill and screenshots...');
+    await checkLandingAndAbout(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
+    await checkLandingAndAbout(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
     await browser.close();
     console.log('\nAll assertions passed. Walkthrough complete.');
