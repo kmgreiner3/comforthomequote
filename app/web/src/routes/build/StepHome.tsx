@@ -49,9 +49,15 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   const setOutline = useBuild((s) => s.setOutline);
   const setOutlineFromSatellite = useBuild((s) => s.setOutlineFromSatellite);
   const savedOutline = useBuild((s) => s.outlineSqft);
+  const outlineSource = useBuild((s) => s.outlineSource);
   const address = useBuild((s) => s.address);
 
-  const [value, setValue] = useState(savedOutline != null ? String(savedOutline) : '');
+  // Client pricing-display rule extends here: a satellite-sourced outline
+  // must never leak into the DOM, including as a prefilled input value on
+  // back-navigation. Manual-sourced saved values may still prefill.
+  const [value, setValue] = useState(
+    savedOutline != null && outlineSource !== 'satellite' ? String(savedOutline) : ''
+  );
   const [phase, setPhase] = useState<Phase>(() => initialPhase(address, savedOutline));
 
   useEffect(() => {

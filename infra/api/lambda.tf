@@ -183,6 +183,10 @@ resource "aws_lambda_function" "viz_generate" {
   filename         = data.archive_file.viz_generate.output_path
   source_code_hash = data.archive_file.viz_generate.output_base64sha256
 
+  # Task 4 gate: visualizer ships dark. Remove with the visualizer UI task,
+  # together with the global daily generate cap and the XFF clientIp fix.
+  reserved_concurrent_executions = 0
+
   environment {
     variables = {
       BUCKET   = aws_s3_bucket.visualizer.bucket

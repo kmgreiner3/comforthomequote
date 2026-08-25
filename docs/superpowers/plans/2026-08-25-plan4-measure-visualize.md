@@ -65,6 +65,13 @@ Store: add `outlineSource: 'satellite' | 'manual' | null`; `setOutlineFromSatell
 
 StepColor top section: upload card ("See these colors on your home. Upload a photo of the front of your house.") → browser downscale to ≤ 1568px JPEG q0.85 (canvas) → presigned PUT → generate for the currently selected color → viewer panel (render above the swatch grid, Lightbox on click) → background warm remaining colors of the active line (2 concurrent, sequential queue, abort on unmount) → per-color: selecting a swatch swaps to its render when ready (spinner chip when in flight). Change/remove photo control. Disclaimer line per Global Constraints. Graceful errors ("We couldn't generate this preview."). Store: `uploadId` persisted; renders map in-memory only (regenerate via cache-hit on revisit). Walkthrough: assert the upload card renders on the color step and the flow degrades silently with no API. Screenshots both widths. Commit: `feat(web): AI roof visualizer on the color step`
 
+**Pre-work from final review** (ship-blocker fixes applied ahead of Task 4; do these before/while building the visualizer UI):
+- Remove `reserved_concurrent_executions = 0` from `aws_lambda_function.viz_generate` in `infra/api/lambda.tf` (the dark-launch gate added in the final review) once the UI is ready to go live, and apply.
+- Fix `clientIp()` in `app/api/src/lib/http.ts` to trust only the CloudFront hop: take the second-from-last entry in `x-forwarded-for`, not the first (the first hop is client-supplied and spoofable; API GW/CloudFront append trusted hops at the end).
+- Add a global daily generate counter (all IPs combined, ~300/day) alongside the existing per-IP and per-uploadId caps on `/api/visualize/generate`, so a distributed burst across many IPs still can't run the Bedrock bill past a fixed ceiling.
+- Consider `disable_execute_api_endpoint` on the HTTP API (force all traffic through the CloudFront custom domain) plus API Gateway stage throttling as defense in depth alongside the DynamoDB caps.
+- Add a TTL to the in-memory SSM key cache in `app/api/src/lib/google.ts`: 60s for a negative (missing/empty key) result, minutes for a positive (valid key) result, so a key rotation or initial `aws ssm put-parameter` is picked up without a redeploy.
+
 ## Task 5: Ship
 
 Final whole-branch review (most capable model) → fix wave if needed → PR → merge → deploy → live smoke through the gate: measure curl, one REAL generate against a real uploaded test photo (~$0.05), confirm render URL serves; update README + memory; report to Kyle with the GCP-key runbook (project → enable Solar API + Geocoding API → create restricted key → `aws ssm put-parameter --name /chq/google-api-key --type SecureString --value <key> --overwrite --profile chq-comforthomequote`).

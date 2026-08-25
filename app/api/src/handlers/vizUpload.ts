@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
-import { json, parseBody } from '../lib/http';
+import { clientIp, json, parseBody } from '../lib/http';
+import { checkAndIncrement, todayStamp } from '../lib/ratelimit';
 
 // Module-scope clients so aws-sdk-client-mock intercepts every call.
 const s3 = new S3Client({});
@@ -11,6 +12,11 @@ const ddb = new DynamoDBClient({});
 
 const BUCKET = process.env.BUCKET ?? '';
 const TABLE = process.env.TABLE ?? '';
+
+// Ship-fix: cap upload volume per IP per day. Presigned PUT cannot enforce
+// a byte-size limit itself (see the comment below), so this cap plus the
+// 30-day lifecycle are the only anonymous-abuse controls on this route.
+const UPLOAD_CAP_PER_IP_PER_DAY = 20;
 
 const PUT_URL_EXPIRY_SECONDS = 15 * 60;
 // Uploads/renders both expire from S3 after 30 days (Global Constraints
@@ -35,13 +41,19 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return json(400, { error: 'contentType must be image/jpeg or image/png' });
   }
 
+  const ip = clientIp(event);
+  const withinCap = await checkAndIncrement(TABLE, `upload#ip#${ip}#${todayStamp()}`, UPLOAD_CAP_PER_IP_PER_DAY);
+  if (!withinCap) {
+    return json(429, { error: 'rate limit exceeded' });
+  }
+
   const uploadId = randomUUID();
   const key = `uploads/${uploadId}.${ext}`;
 
-  // The presigned URL binds Content-Type into the signature (enforced);
-  // plain presigned PUT cannot enforce a max byte range the way a presigned
-  // POST policy can, so the 8MB limit is enforced by S3 bucket policy /
-  // client-side downscaling (Task 4) rather than here.
+  // The presigned URL binds Content-Type into the signature (enforced).
+  // Size is bounded client-side (Task 4 downscaling); presigned PUT itself
+  // does not enforce a size limit. Upload volume is bounded by this
+  // per-IP cap and the 30-day lifecycle.
   const putUrl = await getSignedUrl(
     s3,
     new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType }),

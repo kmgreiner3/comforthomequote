@@ -179,6 +179,21 @@ describe('StepHome satellite measurement: fallback to manual', () => {
   });
 });
 
+describe('StepHome satellite measurement: back-navigation number leak', () => {
+  it('does not prefill the manual form with a satellite-sourced saved outline, and never renders its digits', async () => {
+    useBuild.setState({
+      outlineSource: 'satellite',
+      outlineSqft: 6028.758585289504,
+    });
+
+    setup();
+
+    const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(document.body.textContent).not.toMatch(/6028/);
+  });
+});
+
 describe('StepHome satellite measurement: at-most-once per address', () => {
   it('does not re-fetch on remount for the same address once an outcome is cached', async () => {
     const fetchMock = vi.fn(() =>
