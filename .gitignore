@@ -4,3 +4,4 @@ dist/
 *.tfstate*
 .terraform/
 coverage/
+infra/*/build/
