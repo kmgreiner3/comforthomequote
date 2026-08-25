@@ -25,15 +25,18 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return json(400, { error: 'address is required' });
   }
 
+  // Resolve the Google key before touching the rate limit: calls made while
+  // the key is unset/missing are free (no geocode/Solar cost), so they must
+  // not burn a caller's daily quota for an {available:false} response.
+  const apiKey = await getGoogleApiKey(GOOGLE_KEY_PARAM);
+  if (!apiKey) {
+    return json(200, { available: false });
+  }
+
   const ip = clientIp(event);
   const withinCap = await checkAndIncrement(TABLE, `measure#ip#${ip}#${todayStamp()}`, MEASURE_CAP_PER_IP_PER_DAY);
   if (!withinCap) {
     return json(429, { error: 'rate limit exceeded' });
-  }
-
-  const apiKey = await getGoogleApiKey(GOOGLE_KEY_PARAM);
-  if (!apiKey) {
-    return json(200, { available: false });
   }
 
   const geocode = await geocodeAddress(address, apiKey);

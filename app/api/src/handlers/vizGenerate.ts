@@ -73,30 +73,32 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return json(404, { error: 'unknown upload' });
   }
 
-  const ip = clientIp(event);
-  const withinIpCap = await checkAndIncrement(
-    TABLE,
-    `generate#ip#${ip}#${todayStamp()}`,
-    GENERATE_CAP_PER_IP_PER_DAY,
-  );
-  const withinUploadCap = await checkAndIncrement(
-    TABLE,
-    `generate#upload#${uploadId}`,
-    GENERATE_CAP_PER_UPLOAD,
-  );
-  if (!withinIpCap || !withinUploadCap) {
-    return json(429, { error: 'rate limit exceeded' });
-  }
-
   const slug = slugify(color);
   const renderKey = `renders/${uploadId}/${product}/${slug}.png`;
 
+  // Cache check happens before any rate-limit counters are touched: a
+  // cache hit is free (no Bedrock call), so it must not consume either cap.
   const cacheHit = await s3
     .send(new HeadObjectCommand({ Bucket: BUCKET, Key: renderKey }))
     .then(() => true)
     .catch(() => false);
 
   if (!cacheHit) {
+    const ip = clientIp(event);
+    const withinIpCap = await checkAndIncrement(
+      TABLE,
+      `generate#ip#${ip}#${todayStamp()}`,
+      GENERATE_CAP_PER_IP_PER_DAY,
+    );
+    const withinUploadCap = await checkAndIncrement(
+      TABLE,
+      `generate#upload#${uploadId}`,
+      GENERATE_CAP_PER_UPLOAD,
+    );
+    if (!withinIpCap || !withinUploadCap) {
+      return json(429, { error: 'rate limit exceeded' });
+    }
+
     try {
       const uploadObject = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: uploadKey }));
       const imageBase64 = await bodyToBase64(uploadObject.Body);

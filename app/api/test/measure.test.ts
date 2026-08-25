@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+import { GetParameterCommand, ParameterNotFound, SSMClient } from '@aws-sdk/client-ssm';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { resetGoogleApiKeyCache } from '../src/lib/google';
 
@@ -55,11 +55,21 @@ describe('measure handler', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('returns available:false when the Google key is the unset placeholder', async () => {
+  it('golden: unset key returns available:false with zero rate-limit increments', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'unset' } });
     const res = await handler(eventFor('123 Main St, Tampa, FL'));
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body as string)).toEqual({ available: false });
+    // A no-key response costs nothing (no geocode/Solar call either), so it
+    // must not burn the caller's daily quota.
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('also returns available:false with zero rate-limit increments when the parameter is missing entirely', async () => {
+    ssmMock.on(GetParameterCommand).rejects(new ParameterNotFound({ message: 'not found', $metadata: {} }));
+    const res = await handler(eventFor('123 Main St, Tampa, FL'));
+    expect(JSON.parse(res.body as string)).toEqual({ available: false });
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('golden: FL filter rejects a GA geocode fixture with reason outside-florida', async () => {

@@ -48,6 +48,8 @@ beforeEach(() => {
     .on(GetItemCommand)
     .resolves({ Item: { pk: { S: `upload#${UPLOAD_ID}` }, objectKey: { S: `uploads/${UPLOAD_ID}.jpg` } } });
   ddbMock.on(UpdateItemCommand).resolves({ Attributes: { count: { N: '1' } } });
+  // Default: cache miss (tests that care about a hit override this).
+  s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
 });
 
 describe('vizGenerate handler', () => {
@@ -74,13 +76,16 @@ describe('vizGenerate handler', () => {
     expect(res.statusCode).toBe(429);
   });
 
-  it('golden: a cache hit performs zero bedrock invocations', async () => {
+  it('golden: a cache hit performs zero bedrock invocations and zero rate-limit increments', async () => {
     s3Mock.on(HeadObjectCommand).resolves({});
     const res = await handler(eventFor(validBody()));
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body as string).url).toBeTruthy();
     expect(bedrockMock.commandCalls(InvokeModelCommand)).toHaveLength(0);
     expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
+    // Cache hits are free: neither the per-IP nor the per-uploadId cap
+    // counter should be touched (no DynamoDB UpdateItem at all).
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('on a cache miss, loads the upload, invokes Nova Canvas once, and stores the render', async () => {
