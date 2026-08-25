@@ -41,6 +41,38 @@ describe('useBuild store actions', () => {
     expect(s.sq).toBe(sqFromOutline(2286));
   });
 
+  it('setOutline (manual entry) tags outlineSource as manual', () => {
+    useBuild.getState().setOutline(2000);
+    const s = useBuild.getState();
+    expect(s.outlineSource).toBe('manual');
+    expect(s.outlineSqft).toBe(2000);
+    expect(s.sq).toBe(sqFromOutline(2000));
+  });
+
+  it('setOutlineFromSatellite sets outlineSqft/sq via the same engine and tags outlineSource as satellite', () => {
+    useBuild.getState().setOutlineFromSatellite(1850.5);
+    const s = useBuild.getState();
+    expect(s.outlineSqft).toBe(1850.5);
+    expect(s.sq).toBe(sqFromOutline(1850.5));
+    expect(s.outlineSource).toBe('satellite');
+  });
+
+  it('manual entry overrides a prior satellite value', () => {
+    useBuild.getState().setOutlineFromSatellite(1850.5);
+    expect(useBuild.getState().outlineSource).toBe('satellite');
+
+    useBuild.getState().setOutline(2200);
+
+    const s = useBuild.getState();
+    expect(s.outlineSource).toBe('manual');
+    expect(s.outlineSqft).toBe(2200);
+    expect(s.sq).toBe(sqFromOutline(2200));
+  });
+
+  it('outlineSource defaults to null before either action is called', () => {
+    expect(useBuild.getState().outlineSource).toBeNull();
+  });
+
   it('setShingle resets color because color lists differ per shingle', () => {
     useBuild.getState().setShingle('iko-cambridge');
     useBuild.getState().setColor('Dual Black');
@@ -91,7 +123,7 @@ describe('useBuild store actions', () => {
   it('reset() restores every field to its default', () => {
     const s0 = useBuild.getState();
     s0.setAddress('1 Main St');
-    s0.setOutline(2000);
+    s0.setOutlineFromSatellite(2000);
     s0.setShingle('iko-cambridge');
     s0.setColor('Dual Black');
     s0.setUnderlayment('peel-stick');
@@ -106,6 +138,7 @@ describe('useBuild store actions', () => {
     expect(s.address).toBeNull();
     expect(s.outlineSqft).toBeNull();
     expect(s.sq).toBeNull();
+    expect(s.outlineSource).toBeNull();
     expect(s.shingle).toBeNull();
     expect(s.color).toBeNull();
     expect(s.underlayment).toBe('synthetic');
@@ -193,5 +226,39 @@ describe('persistence', () => {
     expect(rehydrated.shingle).toBe('iko-cambridge');
     expect(rehydrated.color).toBe('Dual Black');
     expect(rehydrated.sq).toBe(sqFromOutline(2000));
+  });
+
+  it('rehydrates cleanly from a pre-Plan-4 persisted blob that has no outlineSource key', async () => {
+    // Simulates localStorage written by a build of the app from before this
+    // field existed: the persisted JSON simply doesn't have the key at all.
+    const legacyBlob = JSON.stringify({
+      state: {
+        address: '42 Wallaby Way',
+        outlineSqft: 2000,
+        sq: 24,
+        shingle: 'iko-cambridge',
+        color: 'Dual Black',
+        underlayment: 'synthetic',
+        dripEdge: null,
+        accepted: false,
+        contact: null,
+        visit: null,
+      },
+      version: 0,
+    });
+
+    // Mirrors what actually happens on a fresh page load: the store starts
+    // from its plain defaults (outlineSource: null among them) before the
+    // persist middleware's rehydrate merges in whatever's in storage.
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlob);
+
+    await useBuild.persist.rehydrate();
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('42 Wallaby Way');
+    expect(s.sq).toBe(24);
+    // Missing from the legacy blob -> falls back to the default, not undefined.
+    expect(s.outlineSource).toBeNull();
   });
 });
