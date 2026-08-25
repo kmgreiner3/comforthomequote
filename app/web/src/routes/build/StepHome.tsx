@@ -3,6 +3,7 @@ import { useBuild } from '../../state/build';
 import { BackChevron, CheckMark, PrimaryButton, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
 import { getMeasurementAttempt, setMeasurementAttempt } from './measurementAttempt';
+import { formatFootprintSqft } from '../../lib/format';
 
 const MIN_SQFT = 500;
 const MAX_SQFT = 15000;
@@ -15,9 +16,13 @@ type Phase =
   | { kind: 'confirm'; sqft: number; imageUrl?: string }
   | { kind: 'form' };
 
-// Client pricing-display rule: never render areas/sq ft/squares derived from
-// the satellite path. `sqft` here is only ever used to call
-// setOutlineFromSatellite() -- it must never be interpolated into JSX.
+// Client pricing-display rule: the satellite-measured FOOTPRINT sq ft may be
+// shown, rounded for display (AUTHORIZED display exception, Kyle,
+// 2026-08-25) -- see formatFootprintSqft(). Roofing squares, the x1.2
+// pitched-area result, and any per-SQ pricing derived from this number must
+// still never be rendered. `sqft` is passed to formatFootprintSqft() for
+// display and to setOutlineFromSatellite() for the store; the store always
+// keeps the exact, unrounded value for pricing.
 function isFoundResponse(data: unknown): data is { found: true; outlineSqft: number; imageUrl?: string } {
   if (!data || typeof data !== 'object') return false;
   const d = data as Record<string, unknown>;
@@ -208,7 +213,7 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
           <RevealItem>
             <img
               src={propertyImageUrl}
-              alt="Aerial view of your home"
+              alt="Aerial view with your roof outlined"
               className="max-h-[260px] w-full max-w-sm rounded-2xl object-cover"
               onError={() => setImgFailed(true)}
             />
@@ -216,11 +221,15 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
         )}
 
         <RevealItem>
-          <div className="flex max-w-sm items-center gap-3 rounded-xl bg-white p-4">
-            <CheckMark className="h-6 w-6 shrink-0 text-blue-600" />
-            <p className="font-display text-lg font-medium text-navy-950">
-              We sized your roof from satellite imagery.
-            </p>
+          <div className="flex max-w-sm items-start gap-3 rounded-xl bg-white p-4">
+            <CheckMark className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
+            <div>
+              <p className="font-display text-lg font-medium text-navy-950">We found your roof.</p>
+              <p className="mt-1 text-sm text-ink/70">
+                Roof footprint: about {formatFootprintSqft(phase.sqft)} sq ft, measured from the outlined
+                building.
+              </p>
+            </div>
           </div>
         </RevealItem>
 

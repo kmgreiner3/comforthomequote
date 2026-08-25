@@ -4,6 +4,7 @@ import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from 
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { clientIp, json, parseBody } from '../lib/http';
 import { checkAndIncrement, todayStamp } from '../lib/ratelimit';
+import type { BoundingBox } from '../lib/google';
 import { geocodeAddress, getGoogleApiKey, getGroundAreaSqft, getStaticMapPng } from '../lib/google';
 
 // Module-scope client so aws-sdk-client-mock's mockClient(S3Client)
@@ -30,16 +31,31 @@ function normalizeAddress(address: string): string {
   return address.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// v3: filenames now bake in the computed-zoom tight framing (see
+// staticMapUrl/computeOverlayZoom in google.ts) -- v2's auto-fit framed the
+// whole city grid around a small building instead of the roof itself.
+// Bumping the prefix means previously cached images (v1 overlay-less, v2
+// auto-fit) regenerate instead of being served stale; the old maps/*
+// objects age out on their own via the existing lifecycle rule (its
+// "maps/" prefix still covers "maps/v3/*"), and the measure Lambda's IAM
+// policy already scopes to "maps/*", which also still covers "maps/v3/*".
 function mapCacheKey(address: string): string {
   const hash = createHash('sha256').update(normalizeAddress(address)).digest('hex');
-  return `maps/${hash}.png`;
+  return `maps/v3/${hash}.png`;
 }
 
 // Best-effort property aerial photo: fetches (or reuses a cached) Static
-// Maps PNG and returns a presigned GET url for it. Never throws -- any
-// failure here must not fail the measurement, so the caller simply gets no
-// imageUrl back.
-async function getPropertyImageUrl(address: string, lat: number, lng: number, apiKey: string): Promise<string | undefined> {
+// Maps PNG -- overlaid with the measured building's bounding box when Solar
+// provided one -- and returns a presigned GET url for it. Never throws --
+// any failure here must not fail the measurement, so the caller simply gets
+// no imageUrl back.
+async function getPropertyImageUrl(
+  address: string,
+  lat: number,
+  lng: number,
+  apiKey: string,
+  boundingBox: BoundingBox | null,
+): Promise<string | undefined> {
   const key = mapCacheKey(address);
   try {
     const cacheHit = await s3
@@ -49,7 +65,7 @@ async function getPropertyImageUrl(address: string, lat: number, lng: number, ap
 
     let objectReady = cacheHit;
     if (!cacheHit) {
-      const png = await getStaticMapPng(lat, lng, apiKey);
+      const png = await getStaticMapPng(lat, lng, apiKey, boundingBox);
       if (png) {
         await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: png, ContentType: 'image/png' }));
         objectReady = true;
@@ -98,15 +114,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return json(200, { found: false, reason: 'outside-florida' });
   }
 
-  const sqft = await getGroundAreaSqft(geocode.lat!, geocode.lng!, apiKey);
-  if (sqft === null) {
+  const solar = await getGroundAreaSqft(geocode.lat!, geocode.lng!, apiKey);
+  if (solar === null) {
     return json(200, { found: false, reason: 'no-roof-data' });
   }
+  const { groundAreaSqft: sqft, boundingBox } = solar;
   if (!(sqft > MIN_PLAUSIBLE_SQFT) || !(sqft < MAX_PLAUSIBLE_SQFT)) {
     return json(200, { found: false, reason: 'unlikely-roof-size' });
   }
 
-  const imageUrl = await getPropertyImageUrl(address, geocode.lat!, geocode.lng!, apiKey);
+  const imageUrl = await getPropertyImageUrl(address, geocode.lat!, geocode.lng!, apiKey, boundingBox);
 
   return json(200, { found: true, outlineSqft: sqft, ...(imageUrl ? { imageUrl } : {}) });
 }
