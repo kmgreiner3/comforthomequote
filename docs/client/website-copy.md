@@ -73,3 +73,9 @@ No salesperson deciding what's best for you. No pressure to make a decision befo
 ## Required footnote (any page showing warranty/wind/financing claims)
 
 "*Manufacturer warranties, wind coverage, and product specifications are subject to the manufacturer's applicable written terms, installation requirements, qualifying components, limitations, and exclusions. Workmanship guarantees are separate from manufacturer warranties and subject to the applicable written workmanship guarantee." Financing estimates require appropriate lender disclosures ("approximately", subject to credit approval).
+
+## Partner page addendum (Dylan, Aug 20 2026)
+
+Full "Online Convenience. Real People." passage (render em-dash-free, tightened): "You may have completed the entire Comfort Home Quote process online, but that doesn't mean you're on your own. Technology makes it possible to research your options, design your roof, understand your pricing, and make your decision from home. Customer service is what makes the experience complete. If you have a question, concern, or simply want to speak with someone about your project, we're here for you. Our team is available around the clock to help guide you through the process, from the moment you accept your quote through installation and beyond. The convenience of an online experience, backed by real people and a trusted local roofing company."
+
+Plus at the bottom of the partner page: the contractor's Florida roofing license and certificate of liability insurance as viewable documents ("add these as attachments on the bottom").

@@ -13,8 +13,10 @@
 //        123 Palm Ave, Tampa, FL -> 2000 sq ft -> Titan XT -> Rustic Black
 //        -> peel & stick -> protection continue -> included continue
 //        -> drip edge Black -> review
-//      asserting PriceHero is absent before a shingle is chosen, and that
-//      the review page shows $14,400 and $144/month.
+//      asserting PriceHero is absent before a shingle is chosen, that the
+//      color step renders a real <img> swatch grid (not colored divs) and
+//      its description panel updates to the selected color's name, and
+//      that the review page shows $14,400 and $144/month.
 //   2. Re-walks every step at 1280x800 via a FRESH full page load per step
 //      (a cache-busting query param forces a real navigation rather than
 //      an in-document fragment-only jump, since the state is already
@@ -23,8 +25,10 @@
 //      Forward" and walks the post-acceptance demo flow (partner -> info
 //      -> schedule -> confirmation), filling demo values along the way and
 //      asserting the confirmation screen shows $14,400 and the scheduled
-//      visit date. Re-walks each /next step at 390x844 via fresh page loads
-//      (state already earned in localStorage from the 1280 walk).
+//      visit date. Screenshots the partner step's documents section
+//      (license/insurance cards) separately. Re-walks each /next step at
+//      390x844 via fresh page loads (state already earned in localStorage
+//      from the 1280 walk), again capturing the documents section.
 //   4. On fresh contexts (per width), verifies the landing page's address
 //      input navigates to /build with the address pre-filled (landing on
 //      the home-size step, not the address step), then loads /about.
@@ -34,7 +38,8 @@
 //
 // Screenshots every /build step at 390x844 and 1280x800 (plus one extra:
 // the shingle step mid-selection on mobile), every /next step at both
-// widths, the landing/about pages at both widths, and the /metal page at
+// widths (plus the partner step's documents section separately at both
+// widths), the landing/about pages at both widths, and the /metal page at
 // both widths (plus the open lightbox at 1280x800), all into
 // .superpowers/sdd/screens/.
 import { spawn } from 'node:child_process';
@@ -183,6 +188,28 @@ async function assertReviewPrice(page, label) {
     fail(`[${label}] Review page did not show $144/month. Page text:\n${bodyText}`);
   }
   console.log(`  [${label}] verified $14,400 and $144/month on review page`);
+}
+
+// Color step (Task: real swatches): the grid must render actual <img>
+// swatches (real photos), not the old colored-div hex chips.
+async function assertColorSwatchGrid(page, label) {
+  const imgCount = await page.locator('[data-testid="build-step"][data-step="color"] img').count();
+  if (imgCount < 10) {
+    fail(`[${label}] expected an <img> swatch grid on the color step, found ${imgCount} <img> element(s)`);
+  }
+  console.log(`  [${label}] swatch grid renders ${imgCount} <img> elements (not colored divs)`);
+}
+
+// Color step: the description panel below the grid must update to name the
+// just-selected color.
+async function assertColorDescription(page, label, expectedColorName) {
+  const name = page.locator('[data-testid="color-description-name"]');
+  await name.waitFor({ timeout: 2000 });
+  const text = (await name.innerText()).trim();
+  if (text !== expectedColorName) {
+    fail(`[${label}] expected color description panel to show "${expectedColorName}", got "${text}"`);
+  }
+  console.log(`  [${label}] description panel shows selected color "${expectedColorName}"`);
 }
 
 async function assertConfirmation(page, label, expectedDateText) {
@@ -353,9 +380,10 @@ async function main() {
     await titanCard.scrollIntoViewIfNeeded();
     await screenshotStep(page, STEPS[2], 390, '-selected');
     await waitForStep(page, 'color');
-
+    await assertColorSwatchGrid(page, '390 color');
     await screenshotStep(page, STEPS[3], 390);
     await page.getByRole('button', { name: 'Rustic Black', exact: true }).click();
+    await assertColorDescription(page, '390 color', 'Rustic Black');
     await waitForStep(page, 'underlayment');
 
     await screenshotStep(page, STEPS[4], 390);
@@ -405,6 +433,8 @@ async function main() {
 
     await waitForNextStep(page, 'partner');
     await screenshotNamed(page, 'next-partner', 1280);
+    await page.locator('[data-testid="partner-doc-1"]').scrollIntoViewIfNeeded();
+    await screenshotNamed(page, 'next-partner-docs', 1280);
     await page.getByRole('button', { name: 'Continue My Project' }).click();
 
     await waitForNextStep(page, 'info');
@@ -437,6 +467,10 @@ async function main() {
       await page.goto(`${BASE_URL}/next?cb=${Date.now()}-${id}#${id}`, { waitUntil: 'domcontentloaded' });
       await waitForNextStep(page, id);
       await screenshotNamed(page, `next-${id}`, 390);
+      if (id === 'partner') {
+        await page.locator('[data-testid="partner-doc-1"]').scrollIntoViewIfNeeded();
+        await screenshotNamed(page, 'next-partner-docs', 390);
+      }
     }
     await assertConfirmation(page, '390 confirmation (fresh load)', expectedVisitDateText);
 

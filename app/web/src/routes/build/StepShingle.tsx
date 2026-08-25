@@ -6,7 +6,28 @@ import { BackChevron, SelectionCard, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
 import { useDelayedContinue } from './useDelayedContinue';
 import Drawer from './Drawer';
+import Lightbox, { type LightboxImage } from '../../components/Lightbox';
 import { WARRANTY_FOOTNOTE } from '../../content/footnote';
+
+// Product literature shown in each shingle's "Learn more" drawer. IKO's
+// three images are pages of the same brochure (one shared caption); Titan's
+// two images are a distinct brochure and a distinct case study.
+const LITERATURE: Record<ShingleKey, LightboxImage[]> = {
+  'iko-cambridge': [
+    { src: '/literature/iko-1.jpg', alt: 'IKO Cambridge brochure, page 1' },
+    { src: '/literature/iko-2.jpg', alt: 'IKO Cambridge brochure, page 2' },
+    { src: '/literature/iko-3.jpg', alt: 'IKO Cambridge brochure, page 3' },
+  ],
+  'tamko-titan-xt': [
+    { src: '/literature/titan-1.jpg', alt: 'Titan XT colors and features' },
+    { src: '/literature/titan-2.jpg', alt: 'Hurricane Milton case study' },
+  ],
+};
+
+const LITERATURE_CAPTIONS: Record<ShingleKey, string[]> = {
+  'iko-cambridge': ['IKO Cambridge brochure', 'IKO Cambridge brochure', 'IKO Cambridge brochure'],
+  'tamko-titan-xt': ['Titan XT colors and features', 'Hurricane Milton case study'],
+};
 
 export default function StepShingle({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const sq = useBuild((s) => s.sq);
@@ -14,6 +35,7 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
   const shingle = useBuild((s) => s.shingle);
   const setShingle = useBuild((s) => s.setShingle);
   const [drawerKey, setDrawerKey] = useState<ShingleKey | null>(null);
+  const [litIndex, setLitIndex] = useState<number | null>(null);
   const advance = useDelayedContinue(onContinue);
 
   if (sq == null) return null; // shouldn't render: gated behind a valid home size
@@ -27,6 +49,11 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
   function select(key: ShingleKey) {
     setShingle(key);
     advance();
+  }
+
+  function openDrawer(key: ShingleKey) {
+    setLitIndex(null);
+    setDrawerKey(key);
   }
 
   return (
@@ -63,7 +90,7 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
             </SelectionCard>
             <button
               type="button"
-              onClick={() => setDrawerKey('iko-cambridge')}
+              onClick={() => openDrawer('iko-cambridge')}
               className="self-start text-sm font-semibold text-blue-600 hover:text-blue-500"
             >
               Learn more
@@ -91,7 +118,7 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
             </SelectionCard>
             <button
               type="button"
-              onClick={() => setDrawerKey('tamko-titan-xt')}
+              onClick={() => openDrawer('tamko-titan-xt')}
               className="self-start text-sm font-semibold text-blue-600 hover:text-blue-500"
             >
               Learn more
@@ -116,10 +143,41 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
                 </li>
               ))}
             </ul>
+
+            <p className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wide text-blue-600">
+              Product literature
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {LITERATURE[drawerKey].map((doc, i) => (
+                <button
+                  key={doc.src}
+                  type="button"
+                  onClick={() => setLitIndex(i)}
+                  data-testid={`literature-${drawerKey}-${i + 1}`}
+                  aria-label={`Open ${LITERATURE_CAPTIONS[drawerKey][i]} full screen`}
+                  className="group min-h-[44px] overflow-hidden rounded-xl border-2 border-navy-950/10 bg-sky-50 text-left transition-colors duration-200 hover:border-blue-600/50"
+                >
+                  <img src={doc.src} alt="" className="aspect-[4/5] w-full object-cover" />
+                  <p className="px-2 py-2 text-[11px] font-medium leading-snug text-ink/70 transition-colors duration-200 group-hover:text-blue-600">
+                    {LITERATURE_CAPTIONS[drawerKey][i]}
+                  </p>
+                </button>
+              ))}
+            </div>
+
             <p className="mt-6 text-xs text-ink/50">*{WARRANTY_FOOTNOTE}</p>
           </div>
         )}
       </Drawer>
+
+      {drawerKey && litIndex !== null && (
+        <Lightbox
+          images={LITERATURE[drawerKey]}
+          index={litIndex}
+          onClose={() => setLitIndex(null)}
+          onIndexChange={setLitIndex}
+        />
+      )}
     </>
   );
 }
