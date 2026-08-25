@@ -1,17 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { GetParameterCommand, ParameterNotFound, SSMClient } from '@aws-sdk/client-ssm';
+import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { resetGoogleApiKeyCache } from '../src/lib/google';
 
 process.env.TABLE = 'chq-api-test';
 process.env.GOOGLE_KEY_PARAM = '/chq/google-api-key-test';
+process.env.BUCKET = 'chq-visualizer-test';
+// See vizUpload.test.ts: presigning signs locally, needs real-shaped but
+// fake static credentials so it resolves offline and instantly.
+process.env.AWS_REGION = 'us-east-1';
+process.env.AWS_ACCESS_KEY_ID = 'test-access-key-id';
+process.env.AWS_SECRET_ACCESS_KEY = 'test-secret-access-key';
 
 const { handler } = await import('../src/handlers/measure');
 
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
+const s3Mock = mockClient(S3Client);
+
+function expectedMapKey(address: string): string {
+  const normalized = address.trim().toLowerCase().replace(/\s+/g, ' ');
+  return `maps/${createHash('sha256').update(normalized).digest('hex')}.png`;
+}
+
+function pngResponse() {
+  return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+}
 
 function eventFor(address: string | undefined, ip = '203.0.113.5'): APIGatewayProxyEventV2 {
   return {
@@ -44,9 +62,13 @@ function flFixture(groundAreaMeters2: number) {
 beforeEach(() => {
   ddbMock.reset();
   ssmMock.reset();
+  s3Mock.reset();
   resetGoogleApiKeyCache();
   vi.unstubAllGlobals();
   ddbMock.on(UpdateItemCommand).resolves({ Attributes: { count: { N: '1' } } });
+  // Default: no cached map image (tests that care about a hit override this).
+  s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+  s3Mock.on(PutObjectCommand).resolves({});
 });
 
 describe('measure handler', () => {
@@ -113,5 +135,102 @@ describe('measure handler', () => {
     ddbMock.on(UpdateItemCommand).resolves({ Attributes: { count: { N: '21' } } });
     const res = await handler(eventFor('123 Main St, Tampa, FL'));
     expect(res.statusCode).toBe(429);
+  });
+});
+
+describe('measure handler property image', () => {
+  const ADDRESS = '123 Main St, Tampa, FL';
+
+  it('golden: a cached map image skips the Static Maps fetch and returns imageUrl', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).resolves({});
+    const fetchMock = flFixture(150);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(true);
+    expect(parsed.imageUrl).toBeTruthy();
+    // Only the geocode + Solar calls happened; no third (Static Maps) fetch.
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
+  });
+
+  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/<sha256>.png', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 27.95, lng: -82.46 } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } } }),
+      })
+      .mockResolvedValueOnce(pngResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(true);
+    expect(parsed.imageUrl).toBeTruthy();
+    const putCalls = s3Mock.commandCalls(PutObjectCommand);
+    expect(putCalls).toHaveLength(1);
+    expect(putCalls[0]?.args[0].input.Key).toBe(expectedMapKey(ADDRESS));
+    expect(putCalls[0]?.args[0].input.ContentType).toBe('image/png');
+  });
+
+  it('a Static Maps failure still returns found:true without imageUrl, and never stores anything', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 27.95, lng: -82.46 } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } } }),
+      })
+      .mockResolvedValueOnce({ ok: false });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(true);
+    expect(parsed.outlineSqft).toBeGreaterThan(0);
+    expect(parsed).not.toHaveProperty('imageUrl');
+    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
+    expect(res.body as string).not.toContain('real-key');
+  });
+
+  it('never leaks the Google API key into the response body on a successful image fetch', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'super-secret-google-key' } });
+    s3Mock.on(HeadObjectCommand).resolves({});
+    vi.stubGlobal('fetch', flFixture(150));
+
+    const res = await handler(eventFor(ADDRESS));
+
+    expect(res.body as string).not.toContain('super-secret-google-key');
   });
 });

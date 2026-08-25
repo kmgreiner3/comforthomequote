@@ -5,6 +5,7 @@ import {
   geocodeAddress,
   getGoogleApiKey,
   getGroundAreaSqft,
+  getStaticMapPng,
   metersToSqft,
   resetGoogleApiKeyCache,
 } from '../src/lib/google';
@@ -118,5 +119,29 @@ describe('getGroundAreaSqft', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
     const sqft = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
     expect(sqft).toBeNull();
+  });
+});
+
+describe('getStaticMapPng', () => {
+  it('returns the PNG bytes on a successful fetch', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => bytes.buffer }),
+    );
+    const png = await getStaticMapPng(27.95, -82.46, 'fake-key');
+    expect(png).toEqual(Buffer.from(bytes));
+  });
+
+  it('returns null (never throws) when the response is not ok', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    const png = await getStaticMapPng(27.95, -82.46, 'fake-key');
+    expect(png).toBeNull();
+  });
+
+  it('returns null (never throws) when fetch itself rejects', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+    const png = await getStaticMapPng(27.95, -82.46, 'fake-key');
+    expect(png).toBeNull();
   });
 });
