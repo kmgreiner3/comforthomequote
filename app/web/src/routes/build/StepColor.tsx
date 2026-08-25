@@ -2,15 +2,13 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { SHINGLES } from '@chq/pricing';
 import { useBuild } from '../../state/build';
 import { colorInfo, SWATCH_NOTE } from '../../content/colorInfo';
-import { BackChevron, CheckMark, StepHeading } from './ui';
+import { BackChevron, CheckMark, PrimaryButton, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
-import { useDelayedContinue } from './useDelayedContinue';
 
 export default function StepColor({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const shingle = useBuild((s) => s.shingle);
   const color = useBuild((s) => s.color);
   const setColor = useBuild((s) => s.setColor);
-  const advance = useDelayedContinue(onContinue);
   const reduce = Boolean(useReducedMotion());
 
   if (shingle == null) return null; // shouldn't render: gated behind a shingle choice
@@ -18,9 +16,10 @@ export default function StepColor({ onContinue, onBack }: { onContinue: () => vo
   const product = SHINGLES[shingle];
   const selectedInfo = color ? colorInfo(color) : undefined;
 
+  // Selecting a swatch only selects it; the description panel below stays
+  // put and legible instead of racing a timer to the next step.
   function select(name: string) {
     setColor(name);
-    advance();
   }
 
   return (
@@ -91,6 +90,12 @@ export default function StepColor({ onContinue, onBack }: { onContinue: () => vo
           )}
           <p className="mt-4 text-xs text-ink/50">{SWATCH_NOTE}</p>
         </div>
+      </RevealItem>
+
+      <RevealItem>
+        <PrimaryButton className="mt-8" disabled={color == null} onClick={onContinue}>
+          Continue
+        </PrimaryButton>
       </RevealItem>
     </RevealGroup>
   );

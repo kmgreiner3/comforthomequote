@@ -1,9 +1,8 @@
 import { peelStickUpgrade } from '@chq/pricing';
 import { useBuild } from '../../state/build';
 import { usd } from '../../lib/format';
-import { BackChevron, IncludedBadge, SelectionCard, StepHeading } from './ui';
+import { BackChevron, IncludedBadge, PrimaryButton, SelectionCard, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
-import { useDelayedContinue } from './useDelayedContinue';
 import type { Underlayment } from '@chq/pricing';
 
 const STANDARD_BENEFITS = [
@@ -22,15 +21,15 @@ export default function StepUnderlayment({ onContinue, onBack }: { onContinue: (
   const sq = useBuild((s) => s.sq);
   const underlayment = useBuild((s) => s.underlayment);
   const setUnderlayment = useBuild((s) => s.setUnderlayment);
-  const advance = useDelayedContinue(onContinue);
 
   if (sq == null) return null; // shouldn't render: gated behind a valid home size
 
   const delta = peelStickUpgrade(sq);
 
+  // Selecting only selects (underlayment always has a valid default, so
+  // Continue is never blocked here); advancing is the explicit tap below.
   function select(u: Underlayment) {
     setUnderlayment(u);
-    advance();
   }
 
   return (
@@ -78,6 +77,12 @@ export default function StepUnderlayment({ onContinue, onBack }: { onContinue: (
             +5 YEARS added to your guarantee
           </span>
         </SelectionCard>
+      </RevealItem>
+
+      <RevealItem>
+        <PrimaryButton className="mt-8" onClick={onContinue}>
+          Continue
+        </PrimaryButton>
       </RevealItem>
     </RevealGroup>
   );

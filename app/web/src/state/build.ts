@@ -10,6 +10,8 @@ import {
   sqFromOutline,
   titanUpgrade,
 } from '@chq/pricing';
+import { clearStepFlags } from '../routes/build/useStepFlags';
+import { clearMeasurementAttempt } from '../routes/build/measurementAttempt';
 
 export type DripEdge = 'White' | 'Black' | 'Brown';
 
@@ -36,6 +38,12 @@ export interface BuildState {
   // internal bookkeeping only (satellite-path numbers must never reach the
   // UI). Manual entry always overrides a prior satellite value.
   outlineSource: OutlineSource;
+  // Presigned S3 URL for the property's aerial photo (Task A's /api/measure
+  // imageUrl), shown on the satellite confirmation card only. Presigned URLs
+  // expire (1h) -- kept in the persisted store for simplicity, but a stale/
+  // expired URL just fails to load; the <img>'s onError handler hides it
+  // rather than the store having to know anything about expiry.
+  propertyImageUrl: string | null;
   shingle: ShingleKey | null;
   color: string | null;
   underlayment: Underlayment; // default 'synthetic'
@@ -48,6 +56,7 @@ export interface BuildState {
   setAddress(a: string): void;
   setOutline(sqft: number): void;
   setOutlineFromSatellite(sqft: number): void;
+  setPropertyImageUrl(url: string | null): void;
   setShingle(k: ShingleKey): void;
   setColor(c: string): void;
   setUnderlayment(u: Underlayment): void;
@@ -56,6 +65,11 @@ export interface BuildState {
   setContact(c: Contact): void;
   setVisit(v: Visit): void;
   reset(): void;
+  // Start-over: resets this store to pristine defaults AND wipes the two
+  // sibling storages that track UI-only progress outside the persisted
+  // store (step-flags localStorage, measurement-attempt sessionStorage), so
+  // a "start over" click can never leave stale progress behind in either.
+  resetQuote(): void;
 }
 
 type PersistedFields = Pick<
@@ -64,6 +78,7 @@ type PersistedFields = Pick<
   | 'outlineSqft'
   | 'sq'
   | 'outlineSource'
+  | 'propertyImageUrl'
   | 'shingle'
   | 'color'
   | 'underlayment'
@@ -78,6 +93,7 @@ const initialState: PersistedFields = {
   outlineSqft: null,
   sq: null,
   outlineSource: null,
+  propertyImageUrl: null,
   shingle: null,
   color: null,
   underlayment: 'synthetic',
@@ -102,6 +118,7 @@ export const useBuild = create<BuildState>()(
       // provenance tag only.
       setOutlineFromSatellite: (sqft) =>
         set({ outlineSqft: sqft, sq: sqFromOutline(sqft), outlineSource: 'satellite' }),
+      setPropertyImageUrl: (url) => set({ propertyImageUrl: url }),
       // Changing shingle resets color: the two products have different color
       // lists. Re-selecting the *same* shingle is a no-op -- it must not
       // wipe a color the user already chose.
@@ -116,6 +133,11 @@ export const useBuild = create<BuildState>()(
       setContact: (c) => set({ contact: c }),
       setVisit: (v) => set({ visit: v }),
       reset: () => set({ ...initialState }),
+      resetQuote: () => {
+        clearStepFlags();
+        clearMeasurementAttempt();
+        set({ ...initialState });
+      },
     }),
     {
       name: 'chq-build-v1',

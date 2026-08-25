@@ -10,19 +10,21 @@ const MAX_SQFT = 15000;
 // Global Constraint: 8s timeout on the measurement fetch.
 const MEASURE_TIMEOUT_MS = 8000;
 
-type Phase = { kind: 'loading' } | { kind: 'confirm'; sqft: number } | { kind: 'form' };
+type Phase =
+  | { kind: 'loading' }
+  | { kind: 'confirm'; sqft: number; imageUrl?: string }
+  | { kind: 'form' };
 
 // Client pricing-display rule: never render areas/sq ft/squares derived from
 // the satellite path. `sqft` here is only ever used to call
 // setOutlineFromSatellite() -- it must never be interpolated into JSX.
-function isFoundResponse(data: unknown): data is { found: true; outlineSqft: number } {
-  return (
-    !!data &&
-    typeof data === 'object' &&
-    (data as Record<string, unknown>).found === true &&
-    typeof (data as Record<string, unknown>).outlineSqft === 'number' &&
-    Number.isFinite((data as Record<string, unknown>).outlineSqft as number)
-  );
+function isFoundResponse(data: unknown): data is { found: true; outlineSqft: number; imageUrl?: string } {
+  if (!data || typeof data !== 'object') return false;
+  const d = data as Record<string, unknown>;
+  if (d.found !== true) return false;
+  if (typeof d.outlineSqft !== 'number' || !Number.isFinite(d.outlineSqft)) return false;
+  if (d.imageUrl !== undefined && typeof d.imageUrl !== 'string') return false;
+  return true;
 }
 
 // On mount, decide the starting phase without ever re-firing a fetch that
@@ -40,7 +42,9 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
 
   const attempt = getMeasurementAttempt();
   if (attempt && attempt.address === address) {
-    return attempt.outcome === 'found' ? { kind: 'confirm', sqft: attempt.sqft } : { kind: 'form' };
+    return attempt.outcome === 'found'
+      ? { kind: 'confirm', sqft: attempt.sqft, imageUrl: attempt.imageUrl }
+      : { kind: 'form' };
   }
   return { kind: 'loading' };
 }
@@ -48,6 +52,8 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
 export default function StepHome({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const setOutline = useBuild((s) => s.setOutline);
   const setOutlineFromSatellite = useBuild((s) => s.setOutlineFromSatellite);
+  const setPropertyImageUrl = useBuild((s) => s.setPropertyImageUrl);
+  const propertyImageUrl = useBuild((s) => s.propertyImageUrl);
   const savedOutline = useBuild((s) => s.outlineSqft);
   const outlineSource = useBuild((s) => s.outlineSource);
   const address = useBuild((s) => s.address);
@@ -59,6 +65,21 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     savedOutline != null && outlineSource !== 'satellite' ? String(savedOutline) : ''
   );
   const [phase, setPhase] = useState<Phase>(() => initialPhase(address, savedOutline));
+  // A presigned imageUrl can go stale (1h expiry) or the image can simply
+  // fail to load; onError just hides it -- the store keeps whatever URL it
+  // has, no need to know about expiry.
+  const [imgFailed, setImgFailed] = useState(false);
+
+  // Keep the store's propertyImageUrl in sync with whatever the confirm
+  // phase is showing, whether that's a fresh fetch or a cached attempt
+  // restored on mount -- one place, instead of duplicating the store write.
+  useEffect(() => {
+    if (phase.kind === 'confirm') {
+      setPropertyImageUrl(phase.imageUrl ?? null);
+      setImgFailed(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   useEffect(() => {
     if (phase.kind !== 'loading') return;
@@ -97,8 +118,13 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
         }
         if (cancelled) return;
         if (isFoundResponse(data)) {
-          setMeasurementAttempt({ address: address as string, outcome: 'found', sqft: data.outlineSqft });
-          setPhase({ kind: 'confirm', sqft: data.outlineSqft });
+          setMeasurementAttempt({
+            address: address as string,
+            outcome: 'found',
+            sqft: data.outlineSqft,
+            ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
+          });
+          setPhase({ kind: 'confirm', sqft: data.outlineSqft, imageUrl: data.imageUrl });
         } else {
           // {available:false} | {found:false, reason} | anything malformed
           fallback();
@@ -136,6 +162,8 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   }
 
   function handlePreferManual() {
+    // No image on the manual path.
+    setPropertyImageUrl(null);
     setPhase({ kind: 'form' });
   }
 
@@ -175,6 +203,17 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
             subtitle="You can find your home's footprint on your county property appraiser's site."
           />
         </RevealItem>
+
+        {propertyImageUrl && !imgFailed && (
+          <RevealItem>
+            <img
+              src={propertyImageUrl}
+              alt="Aerial view of your home"
+              className="max-h-[260px] w-full max-w-sm rounded-2xl object-cover"
+              onError={() => setImgFailed(true)}
+            />
+          </RevealItem>
+        )}
 
         <RevealItem>
           <div className="flex max-w-sm items-center gap-3 rounded-xl bg-white p-4">

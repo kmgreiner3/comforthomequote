@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 
 // Circle (currentColor fill) + white check glyph. Used where the checkmark
 // sits on top of a variable-color background (e.g. a color swatch) and
@@ -110,6 +110,55 @@ export function SecondaryLinkButton({
       className={`min-h-[44px] rounded-full border border-navy-950/20 px-6 py-3 text-sm font-semibold text-navy-950 transition-colors duration-200 hover:border-blue-600 hover:text-blue-600 ${className}`}
       {...props}
     />
+  );
+}
+
+/**
+ * Quiet "Start over" text link with an inline (not window.confirm) confirm
+ * step: a stray tap shows "Clear this quote and start fresh?" with its own
+ * confirm/cancel, so nothing is wiped without a second, deliberate tap.
+ */
+export function StartOverLink({
+  onConfirm,
+  label = 'Start over',
+  className = '',
+}: {
+  onConfirm: () => void;
+  label?: string;
+  className?: string;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  if (confirming) {
+    return (
+      <span className={`inline-flex flex-wrap items-center gap-2 text-sm ${className}`}>
+        <span className="text-ink/70">Clear this quote and start fresh?</span>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="min-h-[44px] font-semibold text-blue-600 hover:text-blue-500"
+        >
+          Yes, start over
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="min-h-[44px] font-semibold text-ink/50 hover:text-ink"
+        >
+          Cancel
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setConfirming(true)}
+      className={`min-h-[44px] text-sm font-medium text-ink/50 underline-offset-2 transition-colors hover:text-blue-600 hover:underline ${className}`}
+    >
+      {label}
+    </button>
   );
 }
 

@@ -9,7 +9,7 @@ import {
 } from '../../state/build';
 import { perMonth, usd } from '../../lib/format';
 import { DECKING_DISCLOSURE, INCLUDED_TILES } from '../../content/included';
-import { CheckMark, SecondaryLinkButton, StepHeading } from './ui';
+import { CheckMark, SecondaryLinkButton, StartOverLink, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
 
 const UNDERLAYMENT_SUMMARY: Record<'synthetic' | 'peel-stick', string> = {
@@ -26,7 +26,13 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function StepReview({ onEdit }: { onEdit: () => void }) {
+export default function StepReview({
+  onEdit,
+  onStartOver,
+}: {
+  onEdit: () => void;
+  onStartOver: () => void;
+}) {
   const state = useBuild();
   const navigate = useNavigate();
 
@@ -97,10 +103,11 @@ export default function StepReview({ onEdit }: { onEdit: () => void }) {
             >
               I&apos;m Ready to Move Forward
             </button>
-            <div className="mt-4 text-center">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-center">
               <SecondaryLinkButton onClick={onEdit} className="border-none text-ink/50 hover:text-blue-600">
                 Edit my roof
               </SecondaryLinkButton>
+              <StartOverLink onConfirm={onStartOver} />
             </div>
           </div>
         </div>

@@ -1,7 +1,6 @@
 import { useBuild, type DripEdge } from '../../state/build';
-import { BackChevron, SelectionCard, StepHeading } from './ui';
+import { BackChevron, PrimaryButton, SelectionCard, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
-import { useDelayedContinue } from './useDelayedContinue';
 
 const DRIP_EDGE_OPTIONS: { value: DripEdge; hex: string }[] = [
   { value: 'White', hex: '#f4f4f2' },
@@ -12,11 +11,9 @@ const DRIP_EDGE_OPTIONS: { value: DripEdge; hex: string }[] = [
 export default function StepFinishing({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const dripEdge = useBuild((s) => s.dripEdge);
   const setDripEdge = useBuild((s) => s.setDripEdge);
-  const advance = useDelayedContinue(onContinue);
 
   function select(value: DripEdge) {
     setDripEdge(value);
-    advance();
   }
 
   return (
@@ -40,6 +37,12 @@ export default function StepFinishing({ onContinue, onBack }: { onContinue: () =
             <span className="mt-3 block text-center text-sm font-semibold">{value}</span>
           </SelectionCard>
         ))}
+      </RevealItem>
+
+      <RevealItem>
+        <PrimaryButton className="mt-8" disabled={dripEdge == null} onClick={onContinue}>
+          Continue
+        </PrimaryButton>
       </RevealItem>
     </RevealGroup>
   );

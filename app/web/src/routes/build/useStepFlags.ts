@@ -34,3 +34,13 @@ export function setStepFlagDone(key: keyof StepFlags): StepFlags {
   }
   return next;
 }
+
+/** Start-over support: wipes the underlayment/protection/included flags. */
+export function clearStepFlags(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // best-effort only
+  }
+}

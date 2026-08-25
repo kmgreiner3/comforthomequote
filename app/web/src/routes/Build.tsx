@@ -24,6 +24,7 @@ export default function Build() {
   // unlock a further step (e.g. setOutline unlocking "shingle"), so the
   // clamp-and-sync logic below needs to re-run whenever the store changes.
   const buildState = useBuild();
+  const resetQuote = useBuild((s) => s.resetQuote);
   const [currentId, setCurrentId] = useState<StepId>('address');
 
   // Deliberately never assigns `location.hash = ...`: that's a real
@@ -79,7 +80,17 @@ export default function Build() {
     applyStep(id, { replace: false });
   }
 
+  // "Start over" (rail + Review's quiet link): resetQuote() alone is enough
+  // to land back on Address -- it changes buildState, which the clamp-and-
+  // sync effect above already reacts to on every store change (address is
+  // now null, so maxAllowedIndex clamps to 0 and rewrites the URL hash to
+  // #address via replaceState). No separate navigation call needed here.
+  function handleStartOver() {
+    resetQuote();
+  }
+
   const isReview = currentId === 'review';
+  const allowedIndex = maxAllowedIndex(buildState, getStepFlags());
 
   return (
     <div className={`min-h-screen bg-sky-50 ${isReview ? 'pb-16' : 'pb-32 md:pb-20'}`}>
@@ -87,13 +98,20 @@ export default function Build() {
           every other step reserves a right-hand gutter so the fixed
           PriceHero card never overlaps live content. */}
       <div className={isReview ? '' : 'md:pr-80'}>
-        <ProgressRail currentIndex={stepIndex(currentId)} />
+        <ProgressRail
+          currentIndex={stepIndex(currentId)}
+          maxAllowedIndex={allowedIndex}
+          onStepClick={goToStep}
+          onStartOver={handleStartOver}
+        />
         <main
           className="mx-auto max-w-4xl px-4 py-10 md:px-6 md:py-14"
           data-testid="build-step"
           data-step={currentId}
         >
-          <StepTransition stepKey={currentId}>{renderStep(currentId, goToStep)}</StepTransition>
+          <StepTransition stepKey={currentId}>
+            {renderStep(currentId, goToStep, handleStartOver)}
+          </StepTransition>
         </main>
       </div>
       {!isReview && <PriceHero />}
@@ -101,7 +119,7 @@ export default function Build() {
   );
 }
 
-function renderStep(id: StepId, goToStep: (id: StepId) => void) {
+function renderStep(id: StepId, goToStep: (id: StepId) => void, onStartOver: () => void) {
   switch (id) {
     case 'address':
       return <StepAddress onContinue={() => goToStep('home')} />;
@@ -144,7 +162,7 @@ function renderStep(id: StepId, goToStep: (id: StepId) => void) {
     case 'finishing':
       return <StepFinishing onContinue={() => goToStep('review')} onBack={goBack} />;
     case 'review':
-      return <StepReview onEdit={() => goToStep('shingle')} />;
+      return <StepReview onEdit={() => goToStep('shingle')} onStartOver={onStartOver} />;
     default:
       return null;
   }

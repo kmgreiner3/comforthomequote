@@ -174,6 +174,19 @@ async function assertColdLoadTop(page, label) {
   console.log(`  [${label}] cold load OK: scrollY=0, header + heading in viewport`);
 }
 
+// Deliberate step flow: selecting a card must never itself navigate. After
+// a selection click, wait a beat (long enough to have caught the old
+// ~420ms auto-advance timer) and assert the step hasn't changed -- only an
+// explicit [Continue] tap may advance.
+async function assertStillOnStep(page, stepId, label, waitMs = 600) {
+  await page.waitForTimeout(waitMs);
+  const actual = await page.locator('[data-testid="build-step"]').getAttribute('data-step');
+  if (actual !== stepId) {
+    fail(`[${label}] expected to still be on step "${stepId}" after selecting (no auto-advance), got "${actual}"`);
+  }
+  console.log(`  [${label}] selection did not auto-advance -- still on "${stepId}"`);
+}
+
 async function assertNoPriceHero(page, label) {
   const count = await page.locator(PRICE_HERO_SELECTOR).count();
   if (count !== 0) {
@@ -402,19 +415,28 @@ async function main() {
     await screenshotStep(page, STEPS[2], 390);
     const titanCard = page.getByText('TAMKO Titan XT');
     await titanCard.click();
-    // Extra screenshot: capture the selected (blue-fill + check) TAMKO card
-    // on mobile before the ~420ms auto-advance navigates to Color.
+    // Selecting only selects: highlight + price update, no navigation.
+    // Extra screenshot: capture the selected (blue-fill + check) TAMKO card,
+    // description still readable, well past where the old ~420ms
+    // auto-advance would have already navigated to Color.
     await titanCard.scrollIntoViewIfNeeded();
     await screenshotStep(page, STEPS[2], 390, '-selected');
+    await assertStillOnStep(page, 'shingle', '390 shingle: card selection');
+    await page.getByRole('button', { name: 'Continue' }).click();
+
     await waitForStep(page, 'color');
     await assertColorSwatchGrid(page, '390 color');
     await screenshotStep(page, STEPS[3], 390);
     await page.getByRole('button', { name: 'Rustic Black', exact: true }).click();
     await assertColorDescription(page, '390 color', 'Rustic Black');
-    await waitForStep(page, 'underlayment');
+    await assertStillOnStep(page, 'color', '390 color: swatch selection');
+    await page.getByRole('button', { name: 'Continue' }).click();
 
+    await waitForStep(page, 'underlayment');
     await screenshotStep(page, STEPS[4], 390);
     await page.getByText('Full Peel & Stick').click();
+    await assertStillOnStep(page, 'underlayment', '390 underlayment: card selection');
+    await page.getByRole('button', { name: 'Continue' }).click();
     await waitForStep(page, 'protection');
 
     await screenshotStep(page, STEPS[5], 390);
@@ -427,6 +449,8 @@ async function main() {
 
     await screenshotStep(page, STEPS[7], 390);
     await page.getByRole('button', { name: 'Black', exact: true }).click();
+    await assertStillOnStep(page, 'finishing', '390 finishing: drip edge selection');
+    await page.getByRole('button', { name: 'Continue' }).click();
     await waitForStep(page, 'review');
 
     await screenshotStep(page, STEPS[8], 390);
@@ -451,6 +475,16 @@ async function main() {
       await screenshotStep(page, step, 1280);
     }
     await assertReviewPrice(page, '1280 desktop (fresh loads)');
+
+    // --- Step rail navigation (item 3): earned steps are directly
+    //     clickable from the desktop rail, not just reachable via URL hash.
+    //     Jump back to an earlier earned step and forward again. ---
+    console.log('\nStep rail (1280x800): earned steps are directly clickable...');
+    await page.getByRole('button', { name: 'Go to Shingle step' }).click();
+    await waitForStep(page, 'shingle');
+    await page.getByRole('button', { name: 'Go to Review step' }).click();
+    await waitForStep(page, 'review');
+    console.log('  [rail] earned-step click navigation verified (Review -> Shingle -> Review)');
 
     // --- Post-acceptance demo flow: continue on the same 1280x800 page,
     //     which is already sitting on /build#review. Walking partner -> info
@@ -500,6 +534,21 @@ async function main() {
       }
     }
     await assertConfirmation(page, '390 confirmation (fresh load)', expectedVisitDateText);
+
+    // --- Start over (item 4b): a completed quote's confirmation page can
+    //     reset straight away, no confirm step (the quote is already done).
+    //     Lands back on a pristine /build#address: empty input, no price. ---
+    console.log('\nStart over (390x844): START A NEW QUOTE from confirmation...');
+    await page.getByRole('button', { name: 'Start a New Quote' }).scrollIntoViewIfNeeded();
+    await page.getByRole('button', { name: 'Start a New Quote' }).click();
+    await waitForStep(page, 'address');
+
+    const addressValueAfterReset = await page.getByLabel('Property address').inputValue();
+    if (addressValueAfterReset !== '') {
+      fail(`[start-over] expected an empty address input after Start a New Quote, got "${addressValueAfterReset}"`);
+    }
+    await assertNoPriceHero(page, 'start-over: back at address step');
+    console.log('  [start-over] confirmed: back at address step, empty input, no price hero');
 
     // --- Landing + About: fresh contexts (no earned config), both widths ---
     console.log('\nLanding + About: fresh-context address prefill and screenshots...');
