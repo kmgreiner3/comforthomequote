@@ -232,6 +232,46 @@ describe('StepHome satellite measurement: property image', () => {
   });
 });
 
+describe('StepHome satellite measurement: outside Florida', () => {
+  it('shows the outside-Florida error card, never the manual fallback, and Fix my address goes back', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: async () => ({ found: false, reason: 'outside-florida' }) })
+      )
+    );
+
+    const { onBack } = setup();
+
+    await screen.findByText('That address is outside Florida.');
+    expect(
+      screen.getByText('We currently serve Florida homes only. Check the address and try again.')
+    ).toBeTruthy();
+    expect(screen.queryByLabelText('Home footprint (sq ft)')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/sizing your roof/i);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fix my address' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-fetch on remount for the same address once outside-florida is cached', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true, json: async () => ({ found: false, reason: 'outside-florida' }) })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    setup();
+    await screen.findByText('That address is outside Florida.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    cleanup();
+
+    render(<StepHome onContinue={vi.fn()} onBack={vi.fn()} />);
+    await screen.findByText('That address is outside Florida.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('StepHome satellite measurement: fallback to manual', () => {
   it.each([
     ['available:false (no Google key configured)', async () => ({ ok: true, json: async () => ({ available: false }) })],

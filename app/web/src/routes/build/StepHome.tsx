@@ -14,7 +14,8 @@ const MEASURE_TIMEOUT_MS = 8000;
 type Phase =
   | { kind: 'loading' }
   | { kind: 'confirm'; sqft: number; imageUrl?: string }
-  | { kind: 'form' };
+  | { kind: 'form' }
+  | { kind: 'outside-florida' };
 
 // Client pricing-display rule: the satellite-measured FOOTPRINT sq ft may be
 // shown, rounded for display (AUTHORIZED display exception, Kyle,
@@ -32,13 +33,24 @@ function isFoundResponse(data: unknown): data is { found: true; outlineSqft: num
   return true;
 }
 
+// {found:false, reason:"outside-florida"} is the one failure mode that
+// gets its own dead-end UI instead of the silent manual-entry fallback --
+// we don't serve outside Florida, so there is no point asking the
+// homeowner to type in a footprint by hand.
+function isOutsideFloridaResponse(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const d = data as Record<string, unknown>;
+  return d.found === false && d.reason === 'outside-florida';
+}
+
 // On mount, decide the starting phase without ever re-firing a fetch that
 // was already resolved for this exact address:
 //  - a footprint is already set (satellite-confirmed earlier, or manual) ->
 //    fall straight to the existing manual form, prefilled.
 //  - we already attempted this address this session -> reuse that outcome
-//    (a cached "found" restores the confirm card; a cached fallback goes
-//    straight to the manual form) instead of calling the API again.
+//    (a cached "found" restores the confirm card, a cached "outside-
+//    florida" restores the error card, a cached fallback goes straight to
+//    the manual form) instead of calling the API again.
 //  - otherwise -> kick off the loading phase, which the effect below turns
 //    into exactly one fetch.
 function initialPhase(address: string | null, savedOutline: number | null): Phase {
@@ -47,9 +59,13 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
 
   const attempt = getMeasurementAttempt();
   if (attempt && attempt.address === address) {
-    return attempt.outcome === 'found'
-      ? { kind: 'confirm', sqft: attempt.sqft, imageUrl: attempt.imageUrl }
-      : { kind: 'form' };
+    if (attempt.outcome === 'found') {
+      return { kind: 'confirm', sqft: attempt.sqft, imageUrl: attempt.imageUrl };
+    }
+    if (attempt.outcome === 'outside-florida') {
+      return { kind: 'outside-florida' };
+    }
+    return { kind: 'form' };
   }
   return { kind: 'loading' };
 }
@@ -130,8 +146,12 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
             ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
           });
           setPhase({ kind: 'confirm', sqft: data.outlineSqft, imageUrl: data.imageUrl });
+        } else if (isOutsideFloridaResponse(data)) {
+          setMeasurementAttempt({ address: address as string, outcome: 'outside-florida' });
+          setPhase({ kind: 'outside-florida' });
         } else {
-          // {available:false} | {found:false, reason} | anything malformed
+          // {available:false} | {found:false, reason: anything else} |
+          // anything malformed
           fallback();
         }
       })
@@ -191,6 +211,29 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
           >
             <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-600/30 border-t-blue-600" />
             <p className="text-base text-ink/70">Sizing your roof from satellite imagery...</p>
+          </div>
+        </RevealItem>
+      </RevealGroup>
+    );
+  }
+
+  if (phase.kind === 'outside-florida') {
+    return (
+      <RevealGroup>
+        <RevealItem>
+          <BackChevron onClick={onBack} />
+        </RevealItem>
+        <RevealItem>
+          <div className="max-w-sm rounded-2xl border-2 border-red-200 bg-red-50 p-5">
+            <p className="font-display text-lg font-semibold text-navy-950">
+              That address is outside Florida.
+            </p>
+            <p className="mt-1.5 text-sm text-ink/70">
+              We currently serve Florida homes only. Check the address and try again.
+            </p>
+            <PrimaryButton className="mt-4" onClick={onBack}>
+              Fix my address
+            </PrimaryButton>
           </div>
         </RevealItem>
       </RevealGroup>

@@ -10,7 +10,7 @@
 //      390x844 and 1280x800 must land with window.scrollY === 0 and the
 //      header + step heading visible in the viewport.
 //   1. Drives the happy path end to end on a 390x844 context:
-//        123 Palm Ave, Tampa, FL -> 2000 sq ft -> Titan XT -> Rustic Black
+//        123 Palm Ave, Tampa, FL 33602 -> 2000 sq ft -> Titan XT -> Rustic Black
 //        -> peel & stick -> protection continue -> included continue
 //        -> drip edge Black -> review
 //      asserting PriceHero is absent before a shingle is chosen, that the
@@ -286,6 +286,11 @@ async function checkColdAddressLoad(browser, width, height) {
 // verifies the landing page's single address input stores the address and
 // navigates to /build landing on the home-size step (address already
 // satisfied), not the address step. Also screenshots landing and About.
+//
+// Feedback round 4: before the happy-path fill, also proves the new
+// full-address validation actually gates the form -- submitting an address
+// with no ZIP must show the ZIP error inline and must NOT navigate away
+// from the landing page.
 async function checkLandingAndAbout(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
@@ -295,7 +300,20 @@ async function checkLandingAndAbout(browser, width, height) {
   await page.waitForSelector('#landing-address');
   await screenshotNamed(page, 'landing', width);
 
-  const testAddress = '456 Ocean Dr, Miami, FL';
+  await page.getByLabel('Property address').fill('123 Palm Ave, Tampa, FL');
+  await page.getByRole('button', { name: 'Build My Roof' }).click();
+  await page
+    .getByText('Include your ZIP code so we find the right home.')
+    .waitFor({ timeout: 2000 });
+  const pathAfterInvalidSubmit = new URL(page.url()).pathname;
+  if (pathAfterInvalidSubmit !== '/') {
+    fail(
+      `[landing @ ${width}x${height}] expected to stay on landing ("/") after a missing-ZIP submit, got "${pathAfterInvalidSubmit}"`
+    );
+  }
+  console.log(`  [landing @ ${width}x${height}] missing-ZIP validation error verified, no navigation`);
+
+  const testAddress = '456 Ocean Dr, Miami, FL 33139';
   await page.getByLabel('Property address').fill(testAddress);
   await page.getByRole('button', { name: 'Build My Roof' }).click();
   await waitForStep(page, 'home');
@@ -405,7 +423,7 @@ async function main() {
     await assertColdLoadTop(page, '390 mobile pass: bare /build cold load');
     await assertNoPriceHero(page, '390 address');
     await screenshotStep(page, STEPS[0], 390);
-    await page.getByLabel('Property address').fill('123 Palm Ave, Tampa, FL');
+    await page.getByLabel('Property address').fill('123 Palm Ave, Tampa, FL 33602');
     await page.getByRole('button', { name: 'Build My Roof' }).click();
 
     await waitForStep(page, 'home');

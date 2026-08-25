@@ -1,9 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useBuild } from '../../state/build';
+import { validateFloridaAddress } from '../../lib/address';
 import { PrimaryButton, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
-
-const MIN_LENGTH = 5;
 
 export default function StepAddress({ onContinue }: { onContinue: () => void }) {
   const setAddress = useBuild((s) => s.setAddress);
@@ -12,12 +11,12 @@ export default function StepAddress({ onContinue }: { onContinue: () => void }) 
   const [touched, setTouched] = useState(false);
 
   const trimmed = value.trim();
-  const isValid = trimmed.length >= MIN_LENGTH;
+  const validation = validateFloridaAddress(value);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setTouched(true);
-    if (!isValid) return;
+    if (!validation.ok) return;
     setAddress(trimmed);
     onContinue();
   }
@@ -42,14 +41,17 @@ export default function StepAddress({ onContinue }: { onContinue: () => void }) 
             name="address"
             type="text"
             autoComplete="off"
-            placeholder="123 Palm Ave, Tampa, FL"
+            placeholder="123 Palm Ave, Tampa, FL 33602"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             className="min-h-[44px] w-full rounded-xl border-2 border-navy-950/15 bg-white px-5 py-4 text-lg text-ink outline-none transition-colors focus:border-blue-600"
           />
-          {touched && !isValid && (
-            <p className="mt-2 text-sm text-red-600">Enter the property address to continue.</p>
+          {touched && !validation.ok && (
+            <p className="mt-2 text-sm text-red-600">{validation.error}</p>
           )}
+          <p className="mt-2 text-sm text-ink/60">
+            Serving Florida homeowners. Enter your full address with ZIP code.
+          </p>
           <PrimaryButton type="submit" className="mt-5 w-full sm:w-auto">
             Build My Roof
           </PrimaryButton>

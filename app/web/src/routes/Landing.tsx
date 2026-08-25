@@ -2,8 +2,7 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useBuild } from '../state/build';
 import { FINANCING_DISCLOSURE } from '../content/footnote';
-
-const MIN_LENGTH = 5;
+import { validateFloridaAddress } from '../lib/address';
 
 const TRUST_POINTS = [
   'No name, phone, or email needed to see your price',
@@ -37,12 +36,12 @@ export default function Landing() {
   const [touched, setTouched] = useState(false);
 
   const trimmed = value.trim();
-  const isValid = trimmed.length >= MIN_LENGTH;
+  const validation = validateFloridaAddress(value);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setTouched(true);
-    if (!isValid) return;
+    if (!validation.ok) return;
     setAddress(trimmed);
     navigate('/build');
   }
@@ -70,7 +69,7 @@ export default function Landing() {
               name="address"
               type="text"
               autoComplete="off"
-              placeholder="123 Palm Ave, Tampa, FL"
+              placeholder="123 Palm Ave, Tampa, FL 33602"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               className="min-h-[44px] w-full flex-1 rounded-xl border-2 border-white/15 bg-white px-5 py-4 text-base text-ink outline-none transition-colors focus:border-blue-500"
@@ -82,9 +81,12 @@ export default function Landing() {
               Build My Roof
             </button>
           </form>
-          {touched && !isValid && (
-            <p className="mt-3 text-sm text-amber-400">Enter your property address to continue.</p>
+          {touched && !validation.ok && (
+            <p className="mt-3 text-sm text-amber-400">{validation.error}</p>
           )}
+          <p className="mt-3 text-sm text-sky-50/60">
+            Serving Florida homeowners. Enter your full address with ZIP code.
+          </p>
         </div>
       </section>
 
