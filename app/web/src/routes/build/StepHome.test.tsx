@@ -59,31 +59,53 @@ describe('StepHome satellite measurement: loading state', () => {
 });
 
 describe('StepHome satellite measurement: found -> confirm', () => {
-  it('shows the confirmation card, never renders the sqft number, and confirming sets outlineSource=satellite', async () => {
+  it('shows the confirmation card with the rounded footprint, never the exact number or squares, and confirming sets outlineSource=satellite', async () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve({
         ok: true,
-        json: async () => ({ found: true, outlineSqft: 1850.5 }),
+        json: async () => ({ found: true, outlineSqft: 2308.32 }),
       })
     );
     vi.stubGlobal('fetch', fetchMock);
 
     const { onContinue } = setup();
 
-    await screen.findByText('We sized your roof from satellite imagery.');
+    await screen.findByText('We found your roof.');
 
-    // Hard rule: never render the satellite-path area/sqft number anywhere.
-    expect(document.body.textContent).not.toMatch(/1850/);
-    expect(document.body.textContent).not.toMatch(/sq ft/i);
+    // AUTHORIZED display exception (Kyle, 2026-08-25): the rounded footprint
+    // sq ft may render. It must be rounded to the nearest 50 with a
+    // thousands separator -- never the exact value -- and roofing squares
+    // must never appear anywhere.
+    expect(screen.getByText(/Roof footprint: about 2,300 sq ft/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/2308/);
+    expect(document.body.textContent).not.toMatch(/squares?\b/i);
 
     fireEvent.click(screen.getByRole('button', { name: 'Looks right, continue' }));
 
     expect(onContinue).toHaveBeenCalledTimes(1);
     const s = useBuild.getState();
     expect(s.outlineSource).toBe('satellite');
-    expect(s.outlineSqft).toBe(1850.5);
+    // The store still keeps the exact, unrounded value for pricing.
+    expect(s.outlineSqft).toBe(2308.32);
     expect(s.sq).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rounds to the nearest 50 at both edges of a bucket (2324 -> 2,300, 2326 -> 2,350)', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 2324 }) })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    setup();
+    await screen.findByText(/Roof footprint: about 2,300 sq ft/);
+    cleanup();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 2326 }) }))
+    );
+    setup('456 Ocean Dr, Miami, FL');
+    await screen.findByText(/Roof footprint: about 2,350 sq ft/);
   });
 
   it('lets the homeowner switch to manual entry instead, without ever prefilling the satellite number', async () => {
@@ -99,7 +121,7 @@ describe('StepHome satellite measurement: found -> confirm', () => {
 
     setup();
 
-    await screen.findByText('We sized your roof from satellite imagery.');
+    await screen.findByText('We found your roof.');
 
     fireEvent.click(
       screen.getByText("Prefer to enter your home's footprint? Enter it manually.")
@@ -132,9 +154,9 @@ describe('StepHome satellite measurement: property image', () => {
 
     setup();
 
-    await screen.findByText('We sized your roof from satellite imagery.');
+    await screen.findByText('We found your roof.');
 
-    const img = (await screen.findByAltText('Aerial view of your home')) as HTMLImageElement;
+    const img = (await screen.findByAltText('Aerial view with your roof outlined')) as HTMLImageElement;
     expect(img.src).toBe(imageUrl);
     expect(useBuild.getState().propertyImageUrl).toBe(imageUrl);
   });
@@ -152,9 +174,9 @@ describe('StepHome satellite measurement: property image', () => {
 
     setup();
 
-    await screen.findByText('We sized your roof from satellite imagery.');
+    await screen.findByText('We found your roof.');
 
-    expect(screen.queryByAltText('Aerial view of your home')).toBeNull();
+    expect(screen.queryByAltText('Aerial view with your roof outlined')).toBeNull();
     expect(useBuild.getState().propertyImageUrl).toBeNull();
   });
 
@@ -172,10 +194,10 @@ describe('StepHome satellite measurement: property image', () => {
 
     setup();
 
-    const img = await screen.findByAltText('Aerial view of your home');
+    const img = await screen.findByAltText('Aerial view with your roof outlined');
     fireEvent.error(img);
 
-    expect(screen.queryByAltText('Aerial view of your home')).toBeNull();
+    expect(screen.queryByAltText('Aerial view with your roof outlined')).toBeNull();
     // The onError handler hides the <img>; it doesn't have to clear the
     // (possibly still-valid) URL out of the store.
     expect(useBuild.getState().propertyImageUrl).toBe(imageUrl);
@@ -197,7 +219,7 @@ describe('StepHome satellite measurement: property image', () => {
 
     setup();
 
-    await screen.findByAltText('Aerial view of your home');
+    await screen.findByAltText('Aerial view with your roof outlined');
 
     fireEvent.click(
       screen.getByText("Prefer to enter your home's footprint? Enter it manually.")
@@ -205,7 +227,7 @@ describe('StepHome satellite measurement: property image', () => {
 
     await screen.findByLabelText('Home footprint (sq ft)');
 
-    expect(screen.queryByAltText('Aerial view of your home')).toBeNull();
+    expect(screen.queryByAltText('Aerial view with your roof outlined')).toBeNull();
     expect(useBuild.getState().propertyImageUrl).toBeNull();
   });
 });
@@ -223,7 +245,7 @@ describe('StepHome satellite measurement: fallback to manual', () => {
 
     const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
     expect(input.value).toBe('');
-    expect(screen.queryByText('We sized your roof from satellite imagery.')).toBeNull();
+    expect(screen.queryByText('We found your roof.')).toBeNull();
     expect(document.body.textContent).not.toMatch(/error|failed|unable|couldn.t/i);
 
     fireEvent.change(input, { target: { value: '2000' } });
@@ -298,7 +320,7 @@ describe('StepHome satellite measurement: at-most-once per address', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     setup();
-    await screen.findByText('We sized your roof from satellite imagery.');
+    await screen.findByText('We found your roof.');
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     cleanup();
@@ -309,7 +331,7 @@ describe('StepHome satellite measurement: at-most-once per address', () => {
     const onContinue = vi.fn();
     render(<StepHome onContinue={onContinue} onBack={vi.fn()} />);
 
-    await screen.findByText('We sized your roof from satellite imagery.');
+    await screen.findByText('We found your roof.');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -323,7 +345,7 @@ describe('StepHome satellite measurement: at-most-once per address', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     setup('123 Palm Ave, Tampa, FL');
-    await screen.findByText('We sized your roof from satellite imagery.');
+    await screen.findByText('We found your roof.');
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     cleanup();

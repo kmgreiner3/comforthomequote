@@ -24,7 +24,7 @@ const s3Mock = mockClient(S3Client);
 
 function expectedMapKey(address: string): string {
   const normalized = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  return `maps/${createHash('sha256').update(normalized).digest('hex')}.png`;
+  return `maps/v2/${createHash('sha256').update(normalized).digest('hex')}.png`;
 }
 
 function pngResponse() {
@@ -39,7 +39,12 @@ function eventFor(address: string | undefined, ip = '203.0.113.5'): APIGatewayPr
   } as unknown as APIGatewayProxyEventV2;
 }
 
-function flFixture(groundAreaMeters2: number) {
+const BBOX_FIXTURE = {
+  sw: { latitude: 27.949, longitude: -82.461 },
+  ne: { latitude: 27.951, longitude: -82.459 },
+};
+
+function flFixture(groundAreaMeters2: number, boundingBox: unknown = BBOX_FIXTURE) {
   return vi
     .fn()
     .mockResolvedValueOnce({
@@ -55,7 +60,10 @@ function flFixture(groundAreaMeters2: number) {
     })
     .mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ solarPotential: { wholeRoofStats: { groundAreaMeters2 } } }),
+      json: async () => ({
+        ...(boundingBox ? { boundingBox } : {}),
+        solarPotential: { wholeRoofStats: { groundAreaMeters2 } },
+      }),
     });
 }
 
@@ -157,7 +165,7 @@ describe('measure handler property image', () => {
     expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
   });
 
-  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/<sha256>.png', async () => {
+  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/v2/<sha256>.png', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
     s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
     const fetchMock = vi
@@ -189,6 +197,87 @@ describe('measure handler property image', () => {
     expect(putCalls).toHaveLength(1);
     expect(putCalls[0]?.args[0].input.Key).toBe(expectedMapKey(ADDRESS));
     expect(putCalls[0]?.args[0].input.ContentType).toBe('image/png');
+  });
+
+  it('draws the measured bounding box as a Static Maps path overlay with 5 matching lat,lng corners', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 27.95, lng: -82.46 } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          boundingBox: BBOX_FIXTURE,
+          solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } },
+        }),
+      })
+      .mockResolvedValueOnce(pngResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+    expect(parsed.found).toBe(true);
+    expect(parsed.imageUrl).toBeTruthy();
+
+    const mapUrl = new URL(fetchMock.mock.calls[2]![0] as string);
+    expect(mapUrl.searchParams.has('path')).toBe(true);
+    const path = decodeURIComponent(mapUrl.searchParams.get('path')!);
+    expect(path.split('|').slice(-5)).toEqual([
+      '27.949,-82.461',
+      '27.951,-82.461',
+      '27.951,-82.459',
+      '27.949,-82.459',
+      '27.949,-82.461',
+    ]);
+    expect(mapUrl.searchParams.has('center')).toBe(false);
+    expect(mapUrl.searchParams.has('zoom')).toBe(false);
+    const putCalls = s3Mock.commandCalls(PutObjectCommand);
+    expect(putCalls[0]?.args[0].input.Key).toBe(expectedMapKey(ADDRESS));
+  });
+
+  it('falls back to a plain center/zoom Static Maps URL (no path) when Solar omits the bounding box', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 27.95, lng: -82.46 } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } } }),
+      })
+      .mockResolvedValueOnce(pngResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+    expect(parsed.found).toBe(true);
+    expect(parsed.imageUrl).toBeTruthy();
+
+    const mapUrl = new URL(fetchMock.mock.calls[2]![0] as string);
+    expect(mapUrl.searchParams.has('path')).toBe(false);
+    expect(mapUrl.searchParams.get('center')).toBe('27.95,-82.46');
+    expect(mapUrl.searchParams.get('zoom')).toBe('20');
   });
 
   it('a Static Maps failure still returns found:true without imageUrl, and never stores anything', async () => {

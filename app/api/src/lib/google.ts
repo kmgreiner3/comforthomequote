@@ -74,7 +74,21 @@ export async function geocodeAddress(address: string, apiKey: string): Promise<G
   };
 }
 
+export interface GoogleLatLng {
+  latitude: number;
+  longitude: number;
+}
+
+// Building-level bounding box from the Solar API. sw/ne are opposite
+// corners (southwest/northeast); the other two corners of the rectangle
+// are derived by combining sw's/ne's lat and lng.
+export interface BoundingBox {
+  sw: GoogleLatLng;
+  ne: GoogleLatLng;
+}
+
 interface GoogleSolarResponse {
+  boundingBox?: BoundingBox;
   solarPotential?: {
     wholeRoofStats?: {
       groundAreaMeters2?: number;
@@ -82,24 +96,72 @@ interface GoogleSolarResponse {
   };
 }
 
+export interface SolarLookup {
+  groundAreaSqft: number;
+  // null when Solar returned no boundingBox for this building -- callers
+  // fall back to a plain center/zoom map with no overlay.
+  boundingBox: BoundingBox | null;
+}
+
 // Returns the ground-projected roof outline in sq ft (never the pitched 3D
-// area), or null when Solar has no data for the location.
-export async function getGroundAreaSqft(lat: number, lng: number, apiKey: string): Promise<number | null> {
+// area) plus the building's bounding box for the overlay, or null when
+// Solar has no data for the location.
+export async function getGroundAreaSqft(lat: number, lng: number, apiKey: string): Promise<SolarLookup | null> {
   const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&key=${apiKey}`;
   const res = await fetch(url);
   if (!res.ok) return null;
   const data = (await res.json()) as GoogleSolarResponse;
   const groundAreaMeters2 = data.solarPotential?.wholeRoofStats?.groundAreaMeters2;
   if (typeof groundAreaMeters2 !== 'number') return null;
-  return metersToSqft(groundAreaMeters2);
+  return {
+    groundAreaSqft: metersToSqft(groundAreaMeters2),
+    boundingBox: data.boundingBox ?? null,
+  };
 }
 
-// Fetches a satellite Static Maps PNG for the given point. Best-effort: any
+// Static Maps overlay styling for the measured-building polygon: fubo blue,
+// translucent fill.
+const OVERLAY_PATH_STYLE = 'color:0x2563C9FF|weight:3|fillcolor:0x2563C933';
+
+// Rectangle corners in overlay-drawing order (sw -> nw -> ne -> se -> back
+// to sw, closing the polygon), each as a Static Maps "lat,lng" point.
+function boundingBoxPathPoints(box: BoundingBox): string[] {
+  const { sw, ne } = box;
+  return [
+    `${sw.latitude},${sw.longitude}`,
+    `${ne.latitude},${sw.longitude}`,
+    `${ne.latitude},${ne.longitude}`,
+    `${sw.latitude},${ne.longitude}`,
+    `${sw.latitude},${sw.longitude}`,
+  ];
+}
+
+// Builds the Static Maps request URL. With a bounding box, draws the
+// measured building as a polygon overlay and lets Static Maps auto-fit the
+// viewport to that path (no center/zoom needed). Without one, falls back to
+// a plain center/zoom satellite view.
+function staticMapUrl(lat: number, lng: number, apiKey: string, boundingBox: BoundingBox | null | undefined): string {
+  const base = 'https://maps.googleapis.com/maps/api/staticmap';
+  const common = 'size=640x400&scale=2&maptype=satellite';
+  if (boundingBox) {
+    const path = `${OVERLAY_PATH_STYLE}|${boundingBoxPathPoints(boundingBox).join('|')}`;
+    return `${base}?path=${encodeURIComponent(path)}&${common}&key=${apiKey}`;
+  }
+  return `${base}?center=${lat},${lng}&zoom=20&${common}&key=${apiKey}`;
+}
+
+// Fetches a satellite Static Maps PNG for the given point, optionally
+// overlaid with the measured building's bounding box. Best-effort: any
 // non-OK response or network failure returns null rather than throwing, so
 // callers can treat property imagery as optional and never fail measurement
 // on its account.
-export async function getStaticMapPng(lat: number, lng: number, apiKey: string): Promise<Buffer | null> {
-  const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=640x400&scale=2&maptype=satellite&key=${apiKey}`;
+export async function getStaticMapPng(
+  lat: number,
+  lng: number,
+  apiKey: string,
+  boundingBox?: BoundingBox | null,
+): Promise<Buffer | null> {
+  const url = staticMapUrl(lat, lng, apiKey, boundingBox);
   try {
     const res = await fetch(url);
     if (!res.ok) return null;

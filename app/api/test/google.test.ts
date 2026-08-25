@@ -102,8 +102,29 @@ describe('geocodeAddress', () => {
   });
 });
 
+const BBOX_FIXTURE = {
+  sw: { latitude: 27.9490, longitude: -82.4610 },
+  ne: { latitude: 27.9510, longitude: -82.4590 },
+};
+
 describe('getGroundAreaSqft', () => {
-  it('converts groundAreaMeters2 to sqft', async () => {
+  it('converts groundAreaMeters2 to sqft and passes through the boundingBox', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          boundingBox: BBOX_FIXTURE,
+          solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } },
+        }),
+      }),
+    );
+    const result = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
+    expect(result?.groundAreaSqft).toBeCloseTo(150 * 10.7639104167, 5);
+    expect(result?.boundingBox).toEqual(BBOX_FIXTURE);
+  });
+
+  it('returns boundingBox: null when Solar has ground area but omits the box', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -111,14 +132,14 @@ describe('getGroundAreaSqft', () => {
         json: async () => ({ solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } } }),
       }),
     );
-    const sqft = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
-    expect(sqft).toBeCloseTo(150 * 10.7639104167, 5);
+    const result = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
+    expect(result?.boundingBox).toBeNull();
   });
 
   it('returns null when Solar has no roof data', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
-    const sqft = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
-    expect(sqft).toBeNull();
+    const result = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
+    expect(result).toBeNull();
   });
 });
 
@@ -143,5 +164,40 @@ describe('getStaticMapPng', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
     const png = await getStaticMapPng(27.95, -82.46, 'fake-key');
     expect(png).toBeNull();
+  });
+
+  it('draws a polygon overlay path with the 5 bounding-box corners, auto-fit (no center/zoom)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getStaticMapPng(27.95, -82.46, 'fake-key', BBOX_FIXTURE);
+
+    const requestedUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    const path = decodeURIComponent(requestedUrl.searchParams.get('path')!);
+    expect(path).toContain('color:0x2563C9FF');
+    expect(path).toContain('weight:3');
+    expect(path).toContain('fillcolor:0x2563C933');
+    const points = [
+      '27.949,-82.461',
+      '27.951,-82.461',
+      '27.951,-82.459',
+      '27.949,-82.459',
+      '27.949,-82.461',
+    ];
+    expect(path.split('|').slice(-5)).toEqual(points);
+    expect(requestedUrl.searchParams.has('center')).toBe(false);
+    expect(requestedUrl.searchParams.has('zoom')).toBe(false);
+  });
+
+  it('falls back to a center/zoom URL with no path when the bounding box is missing', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getStaticMapPng(27.95, -82.46, 'fake-key', null);
+
+    const requestedUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(requestedUrl.searchParams.has('path')).toBe(false);
+    expect(requestedUrl.searchParams.get('center')).toBe('27.95,-82.46');
+    expect(requestedUrl.searchParams.get('zoom')).toBe('20');
   });
 });
