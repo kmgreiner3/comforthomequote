@@ -13,7 +13,7 @@
 - Area math: `sqft = meters2 × 10.7639104167`; measurement returns the GROUND outline (never the pitched 3D area); the frontend keeps using `sqFromOutline()` (× 1.2) unchanged. Florida-only: geocode results outside FL → `{found:false, reason:"outside-florida"}`.
 - Caps (DynamoDB counters, TTL 2 days): measure 20/IP/day; generate 60/IP/day and 40/uploadId total.
 - Uploads/renders: S3 lifecycle expiration 30 days; presigned GET URLs for renders; presigned PUT (≤ 8MB, image/jpeg or image/png) for uploads; bucket CORS allows PUT/GET from https://comforthomequote.com and https://www.comforthomequote.com only.
-- API reached same-origin via a CloudFront `/api/*` behavior (caching disabled, all methods) to the HTTP API origin; API GW routes carry the literal `/api/...` paths so no rewriting. The preview gate stays as-is (gated pages carry the cookie; direct anonymous API hits 302 — acceptable during preview).
+- API reached same-origin via a CloudFront `/api/*` behavior (caching disabled, all methods) to the HTTP API origin; API GW routes carry the literal `/api/...` paths so no rewriting. The preview gate stays on page paths only; /api/* has NO gate function (decided in Task 2), so the DynamoDB per-IP caps are the sole anonymous-abuse control during preview. Acceptable at preview volume.
 - Every user-facing string added: concise, no em dashes, no emojis. Render disclaimer: "AI preview for inspiration only. Actual color and appearance will vary."
 - Conventional commits; root `npm test` + workspace typechecks green before every commit.
 
