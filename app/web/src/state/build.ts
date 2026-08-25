@@ -12,6 +12,7 @@ import {
 } from '@chq/pricing';
 import { clearStepFlags } from '../routes/build/useStepFlags';
 import { clearMeasurementAttempt } from '../routes/build/measurementAttempt';
+import { clearNextStepFlags } from '../routes/next/useStepFlags';
 
 export type DripEdge = 'White' | 'Black' | 'Brown';
 
@@ -65,10 +66,13 @@ export interface BuildState {
   setContact(c: Contact): void;
   setVisit(v: Visit): void;
   reset(): void;
-  // Start-over: resets this store to pristine defaults AND wipes the two
+  // Start-over: resets this store to pristine defaults AND wipes the three
   // sibling storages that track UI-only progress outside the persisted
-  // store (step-flags localStorage, measurement-attempt sessionStorage), so
-  // a "start over" click can never leave stale progress behind in either.
+  // store (build step-flags localStorage, measurement-attempt sessionStorage,
+  // /next step-flags localStorage), so a "start over" click can never leave
+  // stale progress behind in any of them -- including the /next flow's own
+  // partnerSeen flag, which would otherwise silently skip a second quote
+  // straight past the partner (license/insurance) step.
   resetQuote(): void;
 }
 
@@ -136,6 +140,7 @@ export const useBuild = create<BuildState>()(
       resetQuote: () => {
         clearStepFlags();
         clearMeasurementAttempt();
+        clearNextStepFlags();
         set({ ...initialState });
       },
     }),

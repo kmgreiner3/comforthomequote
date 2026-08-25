@@ -19,7 +19,9 @@ export default function ProgressRail({
   currentIndex: number;
   maxAllowedIndex: number;
   onStepClick: (id: StepId) => void;
-  onStartOver: () => void;
+  // Omitted entirely on a pristine quote (nothing to clear yet) -- the
+  // link would just be clutter on the very first screen.
+  onStartOver?: () => void;
 }) {
   const total = STEP_IDS.length;
   const pct = total > 1 ? (currentIndex / (total - 1)) * 100 : 0;
@@ -28,9 +30,11 @@ export default function ProgressRail({
 
   return (
     <div className="mx-auto max-w-4xl px-4 pt-6 md:px-6 md:pt-10" aria-label="Progress">
-      <div className="flex items-center justify-end">
-        <StartOverLink onConfirm={onStartOver} />
-      </div>
+      {onStartOver && (
+        <div className="flex items-center justify-end">
+          <StartOverLink onConfirm={onStartOver} />
+        </div>
+      )}
 
       {/* Mobile: step count + compact back/forward + line */}
       <div className="mt-2 md:hidden">

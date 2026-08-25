@@ -79,6 +79,13 @@ const VIEWPORTS = [
 
 const PRICE_HERO_SELECTOR = '[aria-label="Your roof price"]';
 
+// A disabled -> enabled button flip (e.g. Continue unlocking) still runs a
+// plain CSS color transition (duration-200) even under prefers-reduced-
+// motion, which only disables Motion's own animations. Screenshotting right
+// on the same tick as the flip can catch a mid-transition frame -- wait this
+// long past the flip before any screenshot that could show one.
+const BUTTON_TRANSITION_SETTLE_MS = 300;
+
 function fail(message) {
   console.error(`\nFAIL: ${message}\n`);
   process.exitCode = 1;
@@ -408,6 +415,9 @@ async function main() {
     await page.getByText("Got it. We've sized your roof.").waitFor();
     // Screenshot after the "Got it" confirmation appears, not the empty
     // default state, so the no-per-SQ confirmation moment is verifiable.
+    // This fill also flips Continue disabled -> enabled; wait for its color
+    // transition to settle first so the capture doesn't show it mid-flip.
+    await page.waitForTimeout(BUTTON_TRANSITION_SETTLE_MS);
     await screenshotStep(page, STEPS[1], 390);
     await page.getByRole('button', { name: 'Continue' }).click();
 
@@ -418,8 +428,11 @@ async function main() {
     // Selecting only selects: highlight + price update, no navigation.
     // Extra screenshot: capture the selected (blue-fill + check) TAMKO card,
     // description still readable, well past where the old ~420ms
-    // auto-advance would have already navigated to Color.
+    // auto-advance would have already navigated to Color. The selection also
+    // flips Continue disabled -> enabled; wait for that transition to settle
+    // first so the capture doesn't show it mid-flip.
     await titanCard.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(BUTTON_TRANSITION_SETTLE_MS);
     await screenshotStep(page, STEPS[2], 390, '-selected');
     await assertStillOnStep(page, 'shingle', '390 shingle: card selection');
     await page.getByRole('button', { name: 'Continue' }).click();

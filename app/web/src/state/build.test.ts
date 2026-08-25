@@ -19,10 +19,13 @@ import {
 } from './build';
 import { getStepFlags, setStepFlagDone } from '../routes/build/useStepFlags';
 import { getMeasurementAttempt, setMeasurementAttempt } from '../routes/build/measurementAttempt';
+import { getNextStepFlags, setNextStepFlagDone } from '../routes/next/useStepFlags';
+import { maxAllowedNextIndex, nextStepIndex } from '../routes/next/steps';
 
 const STORAGE_KEY = 'chq-build-v1';
 const STEP_FLAGS_KEY = 'chq-build-flow-v1';
 const MEASUREMENT_ATTEMPT_KEY = 'chq-measure-attempt-v1';
+const NEXT_STEP_FLAGS_KEY = 'chq-next-flow-v1';
 
 beforeEach(() => {
   useBuild.getState().reset();
@@ -198,6 +201,28 @@ describe('useBuild store actions', () => {
     expect(sessionStorage.getItem(MEASUREMENT_ATTEMPT_KEY)).toBeNull();
     expect(getStepFlags()).toEqual({ underlayment: false, protection: false, included: false });
     expect(getMeasurementAttempt()).toBeNull();
+  });
+
+  it('resetQuote() also wipes the /next flow\'s own step-flags localStorage (partnerSeen), so a second quote does not skip the partner step', () => {
+    // A completed first quote leaves partnerSeen=true behind in its own
+    // storage (chq-next-flow-v1) -- separate from the build store and from
+    // build's own step-flags key.
+    setNextStepFlagDone('partnerSeen');
+    expect(localStorage.getItem(NEXT_STEP_FLAGS_KEY)).not.toBeNull();
+    expect(getNextStepFlags()).toEqual({ partnerSeen: true });
+
+    useBuild.getState().resetQuote();
+
+    expect(localStorage.getItem(NEXT_STEP_FLAGS_KEY)).toBeNull();
+    expect(getNextStepFlags()).toEqual({ partnerSeen: false });
+
+    // Without this clear, a second quote's /next flow would compute
+    // maxAllowedNextIndex as already past 'partner' the moment contact/visit
+    // get set, silently skipping the license/insurance step. After
+    // resetQuote(), with contact/visit also back to null, it must land back
+    // on 'partner'.
+    const s = useBuild.getState();
+    expect(maxAllowedNextIndex(s, getNextStepFlags())).toBe(nextStepIndex('partner'));
   });
 
   it('resetQuote() leaves no build config behind even mid-flow (address, shingle, color, flags all set)', () => {

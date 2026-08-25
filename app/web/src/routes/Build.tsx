@@ -91,6 +91,10 @@ export default function Build() {
 
   const isReview = currentId === 'review';
   const allowedIndex = maxAllowedIndex(buildState, getStepFlags());
+  // Nothing to clear yet on a pristine quote (no address, no outline, no
+  // shingle) -- the rail's "Start over" link would just be clutter on the
+  // very first screen, so it only shows up once there's something to lose.
+  const isPristine = !buildState.address && buildState.outlineSqft == null && buildState.shingle == null;
 
   return (
     <div className={`min-h-screen bg-sky-50 ${isReview ? 'pb-16' : 'pb-32 md:pb-20'}`}>
@@ -102,7 +106,7 @@ export default function Build() {
           currentIndex={stepIndex(currentId)}
           maxAllowedIndex={allowedIndex}
           onStepClick={goToStep}
-          onStartOver={handleStartOver}
+          onStartOver={isPristine ? undefined : handleStartOver}
         />
         <main
           className="mx-auto max-w-4xl px-4 py-10 md:px-6 md:py-14"
