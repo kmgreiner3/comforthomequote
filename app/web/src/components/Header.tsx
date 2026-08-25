@@ -15,11 +15,11 @@ export default function Header() {
           <img
             src="/logo.webp"
             alt="Comfort Home Quote"
-            className="h-7 w-7 shrink-0 md:h-9 md:w-9"
-            width={36}
-            height={36}
+            className="h-10 w-10 shrink-0 md:h-14 md:w-14"
+            width={56}
+            height={56}
           />
-          <span className="truncate font-display text-base font-semibold text-white md:text-lg">
+          <span className="truncate font-display text-lg font-semibold text-white md:text-xl">
             Comfort Home Quote
           </span>
         </NavLink>

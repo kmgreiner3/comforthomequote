@@ -17,6 +17,7 @@ const STORAGE_KEY = 'chq-measure-attempt-v1';
 
 export type MeasurementAttempt =
   | { address: string; outcome: 'found'; sqft: number; imageUrl?: string }
+  | { address: string; outcome: 'outside-florida' }
   | { address: string; outcome: 'fallback' };
 
 export function getMeasurementAttempt(): MeasurementAttempt | null {
@@ -34,6 +35,9 @@ export function getMeasurementAttempt(): MeasurementAttempt | null {
         sqft: (parsed as { sqft: number }).sqft,
         ...(typeof imageUrl === 'string' ? { imageUrl } : {}),
       };
+    }
+    if (parsed.outcome === 'outside-florida') {
+      return { address: parsed.address, outcome: 'outside-florida' };
     }
     if (parsed.outcome === 'fallback') {
       return { address: parsed.address, outcome: 'fallback' };
