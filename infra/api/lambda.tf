@@ -82,7 +82,7 @@ data "aws_iam_policy_document" "viz_upload" {
   }
   statement {
     sid       = "RecordUploadMetadata"
-    actions   = ["dynamodb:PutItem"]
+    actions   = ["dynamodb:PutItem", "dynamodb:UpdateItem"]
     resources = [aws_dynamodb_table.api.arn]
   }
 }
