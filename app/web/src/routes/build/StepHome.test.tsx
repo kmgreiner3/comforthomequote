@@ -117,6 +117,99 @@ describe('StepHome satellite measurement: found -> confirm', () => {
   });
 });
 
+describe('StepHome satellite measurement: property image', () => {
+  it('shows the aerial photo above the confirmation message when measure returns an imageUrl', async () => {
+    const imageUrl = 'https://chq-visualizer.s3.amazonaws.com/maps/abc123.png?X-Amz-Signature=xyz';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 1850.5, imageUrl }),
+        })
+      )
+    );
+
+    setup();
+
+    await screen.findByText('We sized your roof from satellite imagery.');
+
+    const img = (await screen.findByAltText('Aerial view of your home')) as HTMLImageElement;
+    expect(img.src).toBe(imageUrl);
+    expect(useBuild.getState().propertyImageUrl).toBe(imageUrl);
+  });
+
+  it('shows no image when measure omits imageUrl (Static Maps failure/unset)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 1850.5 }),
+        })
+      )
+    );
+
+    setup();
+
+    await screen.findByText('We sized your roof from satellite imagery.');
+
+    expect(screen.queryByAltText('Aerial view of your home')).toBeNull();
+    expect(useBuild.getState().propertyImageUrl).toBeNull();
+  });
+
+  it('hides the image silently on a load failure, without touching the store value', async () => {
+    const imageUrl = 'https://chq-visualizer.s3.amazonaws.com/maps/abc123.png?X-Amz-Signature=xyz';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 1850.5, imageUrl }),
+        })
+      )
+    );
+
+    setup();
+
+    const img = await screen.findByAltText('Aerial view of your home');
+    fireEvent.error(img);
+
+    expect(screen.queryByAltText('Aerial view of your home')).toBeNull();
+    // The onError handler hides the <img>; it doesn't have to clear the
+    // (possibly still-valid) URL out of the store.
+    expect(useBuild.getState().propertyImageUrl).toBe(imageUrl);
+    // No error/loading text left behind either.
+    expect(document.body.textContent).not.toMatch(/error|failed|unable/i);
+  });
+
+  it('has no image on the manual path (switching away from a found satellite result clears it)', async () => {
+    const imageUrl = 'https://chq-visualizer.s3.amazonaws.com/maps/abc123.png?X-Amz-Signature=xyz';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 1850.5, imageUrl }),
+        })
+      )
+    );
+
+    setup();
+
+    await screen.findByAltText('Aerial view of your home');
+
+    fireEvent.click(
+      screen.getByText("Prefer to enter your home's footprint? Enter it manually.")
+    );
+
+    await screen.findByLabelText('Home footprint (sq ft)');
+
+    expect(screen.queryByAltText('Aerial view of your home')).toBeNull();
+    expect(useBuild.getState().propertyImageUrl).toBeNull();
+  });
+});
+
 describe('StepHome satellite measurement: fallback to manual', () => {
   it.each([
     ['available:false (no Google key configured)', async () => ({ ok: true, json: async () => ({ available: false }) })],

@@ -28,3 +28,13 @@ export function setNextStepFlagDone(key: keyof NextStepFlags): NextStepFlags {
   }
   return next;
 }
+
+/** Start-over support: wipes the partnerSeen flag (and any future /next flags). */
+export function clearNextStepFlags(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // best-effort only
+  }
+}

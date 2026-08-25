@@ -17,12 +17,20 @@ import {
   selectUpgradeDelta,
   useBuild,
 } from './build';
+import { getStepFlags, setStepFlagDone } from '../routes/build/useStepFlags';
+import { getMeasurementAttempt, setMeasurementAttempt } from '../routes/build/measurementAttempt';
+import { getNextStepFlags, setNextStepFlagDone } from '../routes/next/useStepFlags';
+import { maxAllowedNextIndex, nextStepIndex } from '../routes/next/steps';
 
 const STORAGE_KEY = 'chq-build-v1';
+const STEP_FLAGS_KEY = 'chq-build-flow-v1';
+const MEASUREMENT_ATTEMPT_KEY = 'chq-measure-attempt-v1';
+const NEXT_STEP_FLAGS_KEY = 'chq-next-flow-v1';
 
 beforeEach(() => {
   useBuild.getState().reset();
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 describe('useBuild store actions', () => {
@@ -146,6 +154,89 @@ describe('useBuild store actions', () => {
     expect(s.accepted).toBe(false);
     expect(s.contact).toBeNull();
     expect(s.visit).toBeNull();
+  });
+
+  it('resetQuote() restores the store to pristine defaults, including propertyImageUrl', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('1 Main St');
+    s0.setOutlineFromSatellite(2000);
+    s0.setPropertyImageUrl('https://example.com/aerial.png');
+    s0.setShingle('iko-cambridge');
+    s0.setColor('Dual Black');
+    s0.setUnderlayment('peel-stick');
+    s0.setDripEdge('Black');
+    s0.accept();
+    s0.setContact({ name: 'a', phone: 'b', email: 'c', billing: 'd', method: 'e' });
+    s0.setVisit({ date: '2026-09-01', window: 'Afternoon' });
+
+    useBuild.getState().resetQuote();
+
+    const s = useBuild.getState();
+    expect(s.address).toBeNull();
+    expect(s.outlineSqft).toBeNull();
+    expect(s.sq).toBeNull();
+    expect(s.outlineSource).toBeNull();
+    expect(s.propertyImageUrl).toBeNull();
+    expect(s.shingle).toBeNull();
+    expect(s.color).toBeNull();
+    expect(s.underlayment).toBe('synthetic');
+    expect(s.dripEdge).toBeNull();
+    expect(s.accepted).toBe(false);
+    expect(s.contact).toBeNull();
+    expect(s.visit).toBeNull();
+  });
+
+  it('resetQuote() also wipes the step-flags localStorage and the measurement-attempt sessionStorage', () => {
+    // Populate the two sibling storages the same way the real flow would.
+    setStepFlagDone('underlayment');
+    setStepFlagDone('protection');
+    setMeasurementAttempt({ address: '1 Main St', outcome: 'found', sqft: 1850.5 });
+
+    expect(localStorage.getItem(STEP_FLAGS_KEY)).not.toBeNull();
+    expect(sessionStorage.getItem(MEASUREMENT_ATTEMPT_KEY)).not.toBeNull();
+
+    useBuild.getState().resetQuote();
+
+    expect(localStorage.getItem(STEP_FLAGS_KEY)).toBeNull();
+    expect(sessionStorage.getItem(MEASUREMENT_ATTEMPT_KEY)).toBeNull();
+    expect(getStepFlags()).toEqual({ underlayment: false, protection: false, included: false });
+    expect(getMeasurementAttempt()).toBeNull();
+  });
+
+  it('resetQuote() also wipes the /next flow\'s own step-flags localStorage (partnerSeen), so a second quote does not skip the partner step', () => {
+    // A completed first quote leaves partnerSeen=true behind in its own
+    // storage (chq-next-flow-v1) -- separate from the build store and from
+    // build's own step-flags key.
+    setNextStepFlagDone('partnerSeen');
+    expect(localStorage.getItem(NEXT_STEP_FLAGS_KEY)).not.toBeNull();
+    expect(getNextStepFlags()).toEqual({ partnerSeen: true });
+
+    useBuild.getState().resetQuote();
+
+    expect(localStorage.getItem(NEXT_STEP_FLAGS_KEY)).toBeNull();
+    expect(getNextStepFlags()).toEqual({ partnerSeen: false });
+
+    // Without this clear, a second quote's /next flow would compute
+    // maxAllowedNextIndex as already past 'partner' the moment contact/visit
+    // get set, silently skipping the license/insurance step. After
+    // resetQuote(), with contact/visit also back to null, it must land back
+    // on 'partner'.
+    const s = useBuild.getState();
+    expect(maxAllowedNextIndex(s, getNextStepFlags())).toBe(nextStepIndex('partner'));
+  });
+
+  it('resetQuote() leaves no build config behind even mid-flow (address, shingle, color, flags all set)', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('42 Wallaby Way');
+    s0.setOutline(2000);
+    s0.setShingle('tamko-titan-xt');
+    s0.setColor('Rustic Black');
+    setStepFlagDone('underlayment');
+
+    useBuild.getState().resetQuote();
+
+    expect(localStorage.getItem(STORAGE_KEY)).toContain('"address":null');
+    expect(getStepFlags().underlayment).toBe(false);
   });
 });
 

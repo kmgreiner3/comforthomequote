@@ -54,6 +54,13 @@ data "aws_iam_policy_document" "measure" {
     actions   = ["dynamodb:UpdateItem"]
     resources = [aws_dynamodb_table.api.arn]
   }
+  statement {
+    sid = "PropertyImageCache"
+    # s3:GetObject also authorizes HeadObject (there is no separate
+    # s3:HeadObject action), matching the viz-generate cache-check pattern.
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${aws_s3_bucket.visualizer.arn}/maps/*"]
+  }
 }
 
 resource "aws_iam_role_policy" "measure" {
@@ -151,6 +158,7 @@ resource "aws_lambda_function" "measure" {
     variables = {
       TABLE            = aws_dynamodb_table.api.name
       GOOGLE_KEY_PARAM = aws_ssm_parameter.google_api_key.name
+      BUCKET           = aws_s3_bucket.visualizer.bucket
     }
   }
 }

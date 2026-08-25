@@ -93,3 +93,19 @@ export async function getGroundAreaSqft(lat: number, lng: number, apiKey: string
   if (typeof groundAreaMeters2 !== 'number') return null;
   return metersToSqft(groundAreaMeters2);
 }
+
+// Fetches a satellite Static Maps PNG for the given point. Best-effort: any
+// non-OK response or network failure returns null rather than throwing, so
+// callers can treat property imagery as optional and never fail measurement
+// on its account.
+export async function getStaticMapPng(lat: number, lng: number, apiKey: string): Promise<Buffer | null> {
+  const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=640x400&scale=2&maptype=satellite&key=${apiKey}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const bytes = await res.arrayBuffer();
+    return Buffer.from(bytes);
+  } catch {
+    return null;
+  }
+}

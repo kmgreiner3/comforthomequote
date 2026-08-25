@@ -1,10 +1,18 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { createHash } from 'node:crypto';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { clientIp, json, parseBody } from '../lib/http';
 import { checkAndIncrement, todayStamp } from '../lib/ratelimit';
-import { geocodeAddress, getGoogleApiKey, getGroundAreaSqft } from '../lib/google';
+import { geocodeAddress, getGoogleApiKey, getGroundAreaSqft, getStaticMapPng } from '../lib/google';
+
+// Module-scope client so aws-sdk-client-mock's mockClient(S3Client)
+// intercepts every call regardless of which handler imports this module.
+const s3 = new S3Client({});
 
 const TABLE = process.env.TABLE ?? '';
 const GOOGLE_KEY_PARAM = process.env.GOOGLE_KEY_PARAM ?? '';
+const BUCKET = process.env.BUCKET ?? '';
 
 // Global Constraints: measure capped at 20/IP/day.
 const MEASURE_CAP_PER_IP_PER_DAY = 20;
@@ -13,6 +21,49 @@ const MEASURE_CAP_PER_IP_PER_DAY = 20;
 // the frontend applies sqFromOutline() (x1.2) on top of whatever we return.
 const MIN_PLAUSIBLE_SQFT = 100;
 const MAX_PLAUSIBLE_SQFT = 20000;
+
+const IMAGE_GET_URL_EXPIRY_SECONDS = 60 * 60;
+
+// Collapses whitespace/case variation so the same physical address always
+// maps to the same cache key, regardless of how the caller formatted it.
+function normalizeAddress(address: string): string {
+  return address.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function mapCacheKey(address: string): string {
+  const hash = createHash('sha256').update(normalizeAddress(address)).digest('hex');
+  return `maps/${hash}.png`;
+}
+
+// Best-effort property aerial photo: fetches (or reuses a cached) Static
+// Maps PNG and returns a presigned GET url for it. Never throws -- any
+// failure here must not fail the measurement, so the caller simply gets no
+// imageUrl back.
+async function getPropertyImageUrl(address: string, lat: number, lng: number, apiKey: string): Promise<string | undefined> {
+  const key = mapCacheKey(address);
+  try {
+    const cacheHit = await s3
+      .send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }))
+      .then(() => true)
+      .catch(() => false);
+
+    let objectReady = cacheHit;
+    if (!cacheHit) {
+      const png = await getStaticMapPng(lat, lng, apiKey);
+      if (png) {
+        await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: png, ContentType: 'image/png' }));
+        objectReady = true;
+      }
+    }
+
+    if (!objectReady) return undefined;
+    return await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), {
+      expiresIn: IMAGE_GET_URL_EXPIRY_SECONDS,
+    });
+  } catch {
+    return undefined;
+  }
+}
 
 interface MeasureBody {
   address?: string;
@@ -55,5 +106,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return json(200, { found: false, reason: 'unlikely-roof-size' });
   }
 
-  return json(200, { found: true, outlineSqft: sqft });
+  const imageUrl = await getPropertyImageUrl(address, geocode.lat!, geocode.lng!, apiKey);
+
+  return json(200, { found: true, outlineSqft: sqft, ...(imageUrl ? { imageUrl } : {}) });
 }

@@ -16,7 +16,7 @@
 const STORAGE_KEY = 'chq-measure-attempt-v1';
 
 export type MeasurementAttempt =
-  | { address: string; outcome: 'found'; sqft: number }
+  | { address: string; outcome: 'found'; sqft: number; imageUrl?: string }
   | { address: string; outcome: 'fallback' };
 
 export function getMeasurementAttempt(): MeasurementAttempt | null {
@@ -27,7 +27,13 @@ export function getMeasurementAttempt(): MeasurementAttempt | null {
     const parsed = JSON.parse(raw) as Partial<MeasurementAttempt> | null;
     if (!parsed || typeof parsed.address !== 'string') return null;
     if (parsed.outcome === 'found' && typeof (parsed as { sqft?: unknown }).sqft === 'number') {
-      return { address: parsed.address, outcome: 'found', sqft: (parsed as { sqft: number }).sqft };
+      const imageUrl = (parsed as { imageUrl?: unknown }).imageUrl;
+      return {
+        address: parsed.address,
+        outcome: 'found',
+        sqft: (parsed as { sqft: number }).sqft,
+        ...(typeof imageUrl === 'string' ? { imageUrl } : {}),
+      };
     }
     if (parsed.outcome === 'fallback') {
       return { address: parsed.address, outcome: 'fallback' };
@@ -44,5 +50,15 @@ export function setMeasurementAttempt(attempt: MeasurementAttempt): void {
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(attempt));
   } catch {
     // best-effort persistence only
+  }
+}
+
+/** Start-over support: wipes the at-most-once-per-address measurement cache. */
+export function clearMeasurementAttempt(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // best-effort only
   }
 }

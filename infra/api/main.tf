@@ -47,6 +47,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "visualizer" {
       days = 30
     }
   }
+
+  rule {
+    id     = "expire-maps"
+    status = "Enabled"
+    filter {
+      prefix = "maps/"
+    }
+    expiration {
+      days = 30
+    }
+  }
 }
 
 resource "aws_s3_bucket_cors_configuration" "visualizer" {

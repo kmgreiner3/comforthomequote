@@ -1,7 +1,8 @@
+import { useNavigate } from 'react-router-dom';
 import { SHINGLES } from '@chq/pricing';
 import { selectGuarantee, selectMonthly, selectTotal, useBuild } from '../../state/build';
 import { perMonth, usd } from '../../lib/format';
-import { StepHeading } from '../build/ui';
+import { SecondaryLinkButton, StepHeading } from '../build/ui';
 import { RevealGroup, RevealItem } from '../build/motion';
 
 const UNDERLAYMENT_SUMMARY: Record<'synthetic' | 'peel-stick', string> = {
@@ -41,6 +42,8 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 
 export default function StepConfirm() {
   const state = useBuild();
+  const resetQuote = useBuild((s) => s.resetQuote);
+  const navigate = useNavigate();
   const { shingle, color, underlayment, address, visit } = state;
   if (shingle == null || color == null || visit == null) return null; // shouldn't render: gated behind the full flow
 
@@ -48,6 +51,14 @@ export default function StepConfirm() {
   const monthly = selectMonthly(state);
   const guaranteeInfo = selectGuarantee(state);
   if (total == null || monthly == null || guaranteeInfo == null) return null;
+
+  // The quote is already complete and submitted -- unlike the rail/Review
+  // "start over" affordances, there's nothing left here to lose, so this one
+  // resets straight away with no inline confirm step.
+  function handleStartNew() {
+    resetQuote();
+    navigate('/build#address');
+  }
 
   return (
     <RevealGroup>
@@ -107,6 +118,12 @@ export default function StepConfirm() {
             You did the research. You built your roof. You made the decision. Now we&apos;ll take
             care of bringing it to life.
           </p>
+
+          <div className="mt-6">
+            <SecondaryLinkButton onClick={handleStartNew} className="w-full text-center">
+              Start a New Quote
+            </SecondaryLinkButton>
+          </div>
         </div>
       </RevealItem>
     </RevealGroup>

@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { configuredTotal, estimatedMonthly, titanUpgrade, SHINGLES, type ShingleKey } from '@chq/pricing';
 import { useBuild } from '../../state/build';
 import { perMonth, usd } from '../../lib/format';
-import { BackChevron, SelectionCard, StepHeading } from './ui';
+import { BackChevron, PrimaryButton, SelectionCard, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
-import { useDelayedContinue } from './useDelayedContinue';
 import Drawer from './Drawer';
 import Lightbox, { type LightboxImage } from '../../components/Lightbox';
 import { WARRANTY_FOOTNOTE } from '../../content/footnote';
@@ -36,7 +35,6 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
   const setShingle = useBuild((s) => s.setShingle);
   const [drawerKey, setDrawerKey] = useState<ShingleKey | null>(null);
   const [litIndex, setLitIndex] = useState<number | null>(null);
-  const advance = useDelayedContinue(onContinue);
 
   if (sq == null) return null; // shouldn't render: gated behind a valid home size
 
@@ -46,9 +44,10 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
   const bestTotal = betterTotal + delta;
   const monthlyDelta = estimatedMonthly(bestTotal) - betterMonthly;
 
+  // Selecting a card only selects it (highlight + price + description stay
+  // put). Advancing is always the homeowner's own explicit [Continue] tap.
   function select(key: ShingleKey) {
     setShingle(key);
-    advance();
   }
 
   function openDrawer(key: ShingleKey) {
@@ -124,6 +123,12 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
               Learn more
             </button>
           </div>
+        </RevealItem>
+
+        <RevealItem>
+          <PrimaryButton className="mt-8" disabled={shingle == null} onClick={onContinue}>
+            Continue
+          </PrimaryButton>
         </RevealItem>
       </RevealGroup>
 
