@@ -31,15 +31,17 @@ function normalizeAddress(address: string): string {
   return address.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-// v2: filenames now bake in the bounding-box overlay (see getStaticMapPng).
-// Bumping the prefix means previously cached overlay-less images regenerate
-// instead of being served stale; the old maps/ objects age out on their own
-// via the existing lifecycle rule (its "maps/" prefix still covers
-// "maps/v2/*"), and the measure Lambda's IAM policy already scopes to
-// "maps/*", which also still covers "maps/v2/*".
+// v3: filenames now bake in the computed-zoom tight framing (see
+// staticMapUrl/computeOverlayZoom in google.ts) -- v2's auto-fit framed the
+// whole city grid around a small building instead of the roof itself.
+// Bumping the prefix means previously cached images (v1 overlay-less, v2
+// auto-fit) regenerate instead of being served stale; the old maps/*
+// objects age out on their own via the existing lifecycle rule (its
+// "maps/" prefix still covers "maps/v3/*"), and the measure Lambda's IAM
+// policy already scopes to "maps/*", which also still covers "maps/v3/*".
 function mapCacheKey(address: string): string {
   const hash = createHash('sha256').update(normalizeAddress(address)).digest('hex');
-  return `maps/v2/${hash}.png`;
+  return `maps/v3/${hash}.png`;
 }
 
 // Best-effort property aerial photo: fetches (or reuses a cached) Static

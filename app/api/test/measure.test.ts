@@ -24,7 +24,7 @@ const s3Mock = mockClient(S3Client);
 
 function expectedMapKey(address: string): string {
   const normalized = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  return `maps/v2/${createHash('sha256').update(normalized).digest('hex')}.png`;
+  return `maps/v3/${createHash('sha256').update(normalized).digest('hex')}.png`;
 }
 
 function pngResponse() {
@@ -165,7 +165,7 @@ describe('measure handler property image', () => {
     expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
   });
 
-  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/v2/<sha256>.png', async () => {
+  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/v3/<sha256>.png', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
     s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
     const fetchMock = vi
@@ -199,7 +199,7 @@ describe('measure handler property image', () => {
     expect(putCalls[0]?.args[0].input.ContentType).toBe('image/png');
   });
 
-  it('draws the measured bounding box as a Static Maps path overlay with 5 matching lat,lng corners', async () => {
+  it('draws the measured bounding box as a Static Maps path overlay, centered on the box at a computed tight-fit zoom', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
     s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
     const fetchMock = vi
@@ -240,8 +240,13 @@ describe('measure handler property image', () => {
       '27.949,-82.459',
       '27.949,-82.461',
     ]);
-    expect(mapUrl.searchParams.has('center')).toBe(false);
-    expect(mapUrl.searchParams.has('zoom')).toBe(false);
+    // Auto-fit (no center/zoom) used to frame the whole city grid around
+    // the building instead of the building itself -- now centered on the
+    // bbox centroid at a computed tight-fit zoom (BBOX_FIXTURE's ~222.6m
+    // larger span clamps to zoom 18; see google.test.ts's
+    // computeOverlayZoom tests for the arithmetic).
+    expect(mapUrl.searchParams.get('center')).toBe('27.950000000000003,-82.46000000000001');
+    expect(mapUrl.searchParams.get('zoom')).toBe('18');
     const putCalls = s3Mock.commandCalls(PutObjectCommand);
     expect(putCalls[0]?.args[0].input.Key).toBe(expectedMapKey(ADDRESS));
   });

@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { GetParameterCommand, ParameterNotFound, SSMClient } from '@aws-sdk/client-ssm';
 import {
+  computeOverlayZoom,
   geocodeAddress,
   getGoogleApiKey,
   getGroundAreaSqft,
@@ -166,7 +167,7 @@ describe('getStaticMapPng', () => {
     expect(png).toBeNull();
   });
 
-  it('draws a polygon overlay path with the 5 bounding-box corners, auto-fit (no center/zoom)', async () => {
+  it('draws a polygon overlay path with the 5 bounding-box corners, centered on the box with a computed tight-fit zoom', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -185,8 +186,14 @@ describe('getStaticMapPng', () => {
       '27.949,-82.461',
     ];
     expect(path.split('|').slice(-5)).toEqual(points);
-    expect(requestedUrl.searchParams.has('center')).toBe(false);
-    expect(requestedUrl.searchParams.has('zoom')).toBe(false);
+    // Static Maps auto-fit (no center/zoom) framed the whole city grid
+    // around the building instead of the building itself -- center on the
+    // bbox centroid at a computed zoom instead. BBOX_FIXTURE's larger span
+    // is its ~222.6m lat side (see the computeOverlayZoom tests below for
+    // the arithmetic); that clamps to zoom 18 here.
+    expect(requestedUrl.searchParams.get('center')).toBe('27.950000000000003,-82.46000000000001');
+    expect(requestedUrl.searchParams.get('zoom')).toBe(String(computeOverlayZoom(BBOX_FIXTURE)));
+    expect(requestedUrl.searchParams.get('zoom')).toBe('18');
   });
 
   it('falls back to a center/zoom URL with no path when the bounding box is missing', async () => {
@@ -199,5 +206,68 @@ describe('getStaticMapPng', () => {
     expect(requestedUrl.searchParams.has('path')).toBe(false);
     expect(requestedUrl.searchParams.get('center')).toBe('27.95,-82.46');
     expect(requestedUrl.searchParams.get('zoom')).toBe('20');
+  });
+});
+
+describe('computeOverlayZoom', () => {
+  // zoom(z) is the largest integer with metersPerPixel(z) small enough that
+  // 1.5x the box's larger span fits in 640px, clamped to [17, 20]:
+  //   raw = log2(156543.03392 * cos(lat) * 640 / (1.5 * spanMeters))
+  //   z   = floor(raw), then clamp
+
+  it('a 15m building at lat 27 clamps to the max zoom (20)', () => {
+    // latSpan = 15m exactly (dLat = 15 / 111320 deg), lngSpan = 0, so
+    // spanMeters = max(15, 0, 10) = 15.
+    // raw = log2(156543.03392 * cos(27deg) * 640 / (1.5 * 15))
+    //     = log2(139480.9... * 640 / 22.5) = log2(3,968,624.9... / 22.5)
+    //     ~= 21.9198 -> floor 21 -> clamp(17,20) -> 20
+    const dLat = 15 / 111320;
+    const box = {
+      sw: { latitude: 27 - dLat / 2, longitude: -82.46 },
+      ne: { latitude: 27 + dLat / 2, longitude: -82.46 },
+    };
+    expect(computeOverlayZoom(box)).toBe(20);
+  });
+
+  it('a 120m building at lat 27 computes to zoom 18 (no clamping needed)', () => {
+    // latSpan = 120m exactly (dLat = 120 / 111320 deg), lngSpan = 0, so
+    // spanMeters = max(120, 0, 10) = 120.
+    // raw = log2(156543.03392 * cos(27deg) * 640 / (1.5 * 120))
+    //     ~= 18.9198 -> floor 18 -> clamp(17,20) -> 18
+    const dLat = 120 / 111320;
+    const box = {
+      sw: { latitude: 27 - dLat / 2, longitude: -82.46 },
+      ne: { latitude: 27 + dLat / 2, longitude: -82.46 },
+    };
+    expect(computeOverlayZoom(box)).toBe(18);
+  });
+
+  it('a degenerate (point-like) box floors its span at 10m rather than dividing by ~0', () => {
+    const box = {
+      sw: { latitude: 27, longitude: -82.46 },
+      ne: { latitude: 27, longitude: -82.46 },
+    };
+    // spanMeters = max(0, 0, 10) = 10 -> raw ~= 22.5047 -> floor 22 -> clamp 20
+    expect(computeOverlayZoom(box)).toBe(20);
+  });
+
+  it('a very large building (300m span) computes to the min zoom (17), still unclamped from above', () => {
+    const dLat = 300 / 111320;
+    const box = {
+      sw: { latitude: 27 - dLat / 2, longitude: -82.46 },
+      ne: { latitude: 27 + dLat / 2, longitude: -82.46 },
+    };
+    // raw ~= 17.5979 -> floor 17 -> clamp(17,20) -> 17
+    expect(computeOverlayZoom(box)).toBe(17);
+  });
+
+  it('an enormous span clamps to the min zoom (17) rather than floor going below it', () => {
+    const dLat = 1000 / 111320;
+    const box = {
+      sw: { latitude: 27 - dLat / 2, longitude: -82.46 },
+      ne: { latitude: 27 + dLat / 2, longitude: -82.46 },
+    };
+    // raw ~= 15.8609 -> floor 15 -> clamp(17,20) -> 17
+    expect(computeOverlayZoom(box)).toBe(17);
   });
 });
