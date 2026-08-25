@@ -14,9 +14,12 @@
 //        -> peel & stick -> protection continue -> included continue
 //        -> drip edge Black -> review
 //      asserting PriceHero is absent before a shingle is chosen, that the
-//      color step renders a real <img> swatch grid (not colored divs) and
-//      its description panel updates to the selected color's name, and
-//      that the review page shows $14,400 and $144/month.
+//      home step's satellite measurement (Plan 4 Task 3) falls back to the
+//      plain manual form silently -- no error/loading text left on screen --
+//      since preview has no live /api/measure, that the color step renders
+//      a real <img> swatch grid (not colored divs) and its description
+//      panel updates to the selected color's name, and that the review page
+//      shows $14,400 and $144/month.
 //   2. Re-walks every step at 1280x800 via a FRESH full page load per step
 //      (a cache-busting query param forces a real navigation rather than
 //      an in-document fragment-only jump, since the state is already
@@ -177,6 +180,29 @@ async function assertNoPriceHero(page, label) {
     fail(`[${label}] PriceHero should not render before a shingle is selected (found ${count} element(s))`);
   }
   console.log(`  [${label}] PriceHero correctly absent (no shingle selected yet)`);
+}
+
+// Plan 4 Task 3: the home step's satellite measurement call has no live API
+// in preview (returns available:false, or errors/404s entirely once the
+// gate has no /api/* deploy behind it). Every one of those outcomes must
+// fall back to the plain manual footprint form silently -- no spinner stuck
+// forever, no error banner, no "couldn't measure" text anywhere on the step.
+async function assertNoMeasurementErrorUI(page, label) {
+  const homeStep = page.locator('[data-testid="build-step"][data-step="home"]');
+  // Preview has no live /api/measure (available:false, a 404, or a network
+  // error depending on how it's served) -- StepHome must fall back to the
+  // plain manual form on its own, within the 8s measurement timeout, with
+  // no error banner ever shown. Wait it out rather than racing it.
+  try {
+    await homeStep.locator('label[for="footprint"]').waitFor({ timeout: 9000 });
+  } catch {
+    fail(`[${label}] manual footprint form never appeared -- satellite fallback did not resolve`);
+  }
+  const text = await homeStep.innerText();
+  if (/sizing your roof|error|failed|unable|couldn.t/i.test(text)) {
+    fail(`[${label}] unexpected loading/error text still visible on the home step: ${text}`);
+  }
+  console.log(`  [${label}] no measurement error/loading UI visible; manual form present`);
 }
 
 async function assertReviewPrice(page, label) {
@@ -364,6 +390,7 @@ async function main() {
 
     await waitForStep(page, 'home');
     await assertNoPriceHero(page, '390 home');
+    await assertNoMeasurementErrorUI(page, '390 home');
     await page.getByLabel('Home footprint (sq ft)').fill('2000');
     await page.getByText("Got it. We've sized your roof.").waitFor();
     // Screenshot after the "Got it" confirmation appears, not the empty

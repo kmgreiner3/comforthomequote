@@ -10,7 +10,13 @@ const SELECT_ADVANCE_DELAY_MS = 420;
  * stray navigation later.
  */
 export function useDelayedContinue(onContinue: () => void) {
-  const timeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  // Typed as `number` (not ReturnType<typeof window.setTimeout>): the browser
+  // DOM lib and @types/node both declare global setTimeout overloads, and
+  // once both are on the program (Node types can get pulled in transitively
+  // by other workspaces' tooling) that ReturnType derivation picks Node's
+  // Timeout overload while the actual `window.setTimeout` call still returns
+  // a number, so the two disagree in a way that only DOM's does not.
+  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {

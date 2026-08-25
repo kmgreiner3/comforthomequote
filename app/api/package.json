@@ -1,0 +1,25 @@
+{
+  "name": "@chq/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1117.0",
+    "@aws-sdk/client-dynamodb": "^3.1117.0",
+    "@aws-sdk/client-s3": "^3.1117.0",
+    "@aws-sdk/client-ssm": "^3.1117.0",
+    "@aws-sdk/s3-request-presigner": "^3.1117.0",
+    "@chq/pricing": "*"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.162",
+    "@types/node": "^22.10.0",
+    "aws-sdk-client-mock": "^4.1.0",
+    "esbuild": "^0.28.2"
+  }
+}
