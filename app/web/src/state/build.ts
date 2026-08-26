@@ -62,8 +62,12 @@ export interface BuildState {
   // actions
   // `placeId`: pass the picked suggestion's placeId when `a` came from the
   // address-suggest dropdown, omit/null for a free-typed address. Setting
-  // the SAME address (string equality against the current value) is a
-  // no-op -- nothing is cleared, nothing is rewritten. Setting a DIFFERENT
+  // the SAME address (string equality against the current value) with an
+  // unchanged (or omitted) placeId is a no-op -- nothing is cleared,
+  // nothing is rewritten. Setting the SAME address but a NEWLY PICKED,
+  // different placeId records just that placeId and clears the
+  // measurement-attempt cache (so /api/measure retries via the new exact-
+  // match geocode), without touching anything else. Setting a DIFFERENT
   // address clears outline/sq/outlineSource/propertyImageUrl (the prior
   // measurement no longer applies to a different property) and the
   // measurement-attempt cache, but deliberately leaves shingle/color/
@@ -138,7 +142,21 @@ export const useBuild = create<BuildState>()(
       ...initialState,
 
       setAddress: (a, placeId) => {
-        if (get().address === a) return; // same address: no-op, nothing to clear/rewrite
+        if (get().address === a) {
+          // Same address text. `placeId === undefined` means the caller
+          // has no opinion about it (e.g. a plain free-typed resubmit) --
+          // leave whatever's already stored alone, a true no-op. But a
+          // NEWLY PICKED placeId (explicitly passed, and different from
+          // what's stored) must not be silently dropped just because the
+          // address text happens to already match -- record it and clear
+          // the measurement-attempt cache so /api/measure retries via the
+          // new exact-match geocode. Nothing else about the configuration
+          // changes: it's still the same physical address.
+          if (placeId === undefined || placeId === get().placeId) return;
+          clearMeasurementAttempt();
+          set({ placeId });
+          return;
+        }
         clearMeasurementAttempt();
         set({
           address: a,

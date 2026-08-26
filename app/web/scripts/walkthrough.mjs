@@ -522,21 +522,27 @@ async function main() {
     // under prefers-reduced-motion instead of mid-transition/mid-stagger).
     await page.emulateMedia({ reducedMotion: 'reduce' });
 
-    // Feedback round 5: preview has no live /api/address-suggest, so the
-    // combobox's fetch will fail/404 on every keystroke past 4 chars --
-    // track console/page errors so a regression that surfaces as a thrown
-    // JS error (rather than being silently swallowed, as the combobox's
-    // own catch block is supposed to do) actually fails the run. The
-    // browser itself always logs a "Failed to load resource: 404" console
-    // error for the failed /api/address-suggest (and /api/measure) network
-    // request regardless of whether application code handled it -- that's
-    // expected noise here, not a bug, so it's filtered out rather than
-    // treated as a failure.
+    // Feedback round 5: preview has no live /api/address-suggest (nor
+    // /api/measure), so those two fetches will fail/404 -- track
+    // console/page errors so a regression that surfaces as a thrown JS
+    // error (rather than being silently swallowed, as the relevant catch
+    // blocks are supposed to do) actually fails the run. The browser
+    // itself always logs a "Failed to load resource: 404" console error
+    // for a failed network request regardless of whether application code
+    // handled it -- expected noise for exactly those two known-absent-in-
+    // preview endpoints, so it's filtered out ONLY for them (verified via
+    // msg.location().url, not the message text, so it can't accidentally
+    // swallow a "Failed to load resource" for anything else, e.g. a real
+    // asset 404 that would be a genuine bug).
+    const KNOWN_ABSENT_PREVIEW_APIS = ['/api/address-suggest', '/api/measure'];
     const consoleErrors = [];
     page.on('console', (msg) => {
-      if (msg.type() === 'error' && !/Failed to load resource/.test(msg.text())) {
-        consoleErrors.push(msg.text());
-      }
+      if (msg.type() !== 'error') return;
+      const text = msg.text();
+      const failedResourceUrl = /Failed to load resource/.test(text) ? msg.location()?.url ?? '' : '';
+      const isKnownAbsentApi404 = KNOWN_ABSENT_PREVIEW_APIS.some((p) => failedResourceUrl.includes(p));
+      if (isKnownAbsentApi404) return;
+      consoleErrors.push(text);
     });
     page.on('pageerror', (err) => consoleErrors.push(String(err)));
 

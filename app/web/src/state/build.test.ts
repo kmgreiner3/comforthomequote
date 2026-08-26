@@ -276,6 +276,39 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
     expect(getMeasurementAttempt()).not.toBeNull();
   });
 
+  it('setAddress with the SAME address but a NEWLY PICKED (different) placeId records it and clears the measurement attempt, without touching anything else', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602'); // free-typed, no placeId yet
+    s0.setOutline(2000);
+    s0.setPropertyImageUrl('https://example.com/aerial.png');
+    setMeasurementAttempt({ address: '123 Palm Ave, Tampa, FL 33602', outcome: 'fallback' });
+    expect(getMeasurementAttempt()).not.toBeNull();
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('123 Palm Ave, Tampa, FL 33602');
+    expect(s.placeId).toBe('places/abc123');
+    // The measurement-attempt cache is cleared so /api/measure retries via
+    // the new exact-match geocode...
+    expect(getMeasurementAttempt()).toBeNull();
+    // ...but nothing else about the existing configuration is touched --
+    // it's still the same physical address.
+    expect(s.outlineSqft).toBe(2000);
+    expect(s.propertyImageUrl).toBe('https://example.com/aerial.png');
+  });
+
+  it('setAddress with the SAME address and the SAME placeId (re-passed) is still a full no-op', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+    setMeasurementAttempt({ address: '123 Palm Ave, Tampa, FL 33602', outcome: 'found', sqft: 2000 });
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+
+    expect(useBuild.getState().placeId).toBe('places/abc123');
+    expect(getMeasurementAttempt()).not.toBeNull(); // not cleared -- nothing changed
+  });
+
   it('setAddress with a DIFFERENT address clears outline/sq/outlineSource/propertyImageUrl/placeId and the measurement attempt', () => {
     const s0 = useBuild.getState();
     s0.setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');

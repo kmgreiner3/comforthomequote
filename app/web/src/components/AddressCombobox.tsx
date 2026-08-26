@@ -58,6 +58,16 @@ export default function AddressCombobox({
   // otherwise immediately re-fire for that description text. Skip exactly
   // that one resulting fetch.
   const skipNextFetchRef = useRef(false);
+  // Guards against firing a fetch (and burning a billed Places call) for a
+  // value this component never saw the user type -- e.g. StepAddress
+  // mounting pre-filled with an already-saved address (the address chip's
+  // "Change" flow). The effect below is keyed on `value`, which also runs
+  // on mount; without this, revisiting the address step would immediately
+  // re-query and pop open an undismissable dropdown (the input was never
+  // focused, so blur can't close it). Only an actual keystroke through the
+  // input's own onChange sets this to true, and it stays true for the
+  // rest of this mount once it does.
+  const hasUserEditedRef = useRef(false);
   const listboxId = `${id}-listbox`;
 
   function ensureSessionToken(): string {
@@ -70,6 +80,7 @@ export default function AddressCombobox({
       skipNextFetchRef.current = false;
       return;
     }
+    if (!hasUserEditedRef.current) return;
 
     const trimmed = value.trim();
     if (trimmed.length < MIN_CHARS) {
@@ -161,13 +172,16 @@ export default function AddressCombobox({
         type="text"
         role="combobox"
         aria-expanded={open}
-        aria-controls={listboxId}
+        aria-controls={open ? listboxId : undefined}
         aria-autocomplete="list"
         aria-activedescendant={activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined}
         autoComplete="off"
         placeholder={placeholder}
         value={value}
-        onChange={(e) => onValueChange(e.target.value)}
+        onChange={(e) => {
+          hasUserEditedRef.current = true;
+          onValueChange(e.target.value);
+        }}
         onFocus={ensureSessionToken}
         onKeyDown={handleKeyDown}
         onBlur={closeDropdown}

@@ -3,8 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import AddressCombobox from './AddressCombobox';
 
-function Wrapper({ onSelect }: { onSelect: (description: string, placeId: string) => void }) {
-  const [value, setValue] = useState('');
+function Wrapper({
+  onSelect,
+  initialValue = '',
+}: {
+  onSelect: (description: string, placeId: string) => void;
+  initialValue?: string;
+}) {
+  const [value, setValue] = useState(initialValue);
   return (
     <AddressCombobox
       id="test-address"
@@ -94,6 +100,53 @@ describe('AddressCombobox: debounce + min chars', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body.input).toBe('123 Palm A');
+  });
+});
+
+describe('AddressCombobox: no fetch for a value the user never typed', () => {
+  it('mounting pre-filled with a saved address (>= 4 chars) fetches nothing and stays closed -- the address-chip "Change" revisit flow', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve({ ok: true, json: async () => SUGGEST_RESPONSE })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<Wrapper onSelect={vi.fn()} initialValue="123 Palm Ave, Tampa, FL 33602" />);
+
+    // Give the mount-time effect (and any debounce it might schedule)
+    // plenty of room to fire before asserting it never did.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    const input = screen.getByRole('combobox');
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+    expect(input.getAttribute('aria-controls')).toBeNull();
+  });
+
+  it('starts fetching normally as soon as the user actually edits the pre-filled value', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve({ ok: true, json: async () => SUGGEST_RESPONSE })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<Wrapper onSelect={vi.fn()} initialValue="123 Palm Ave, Tampa, FL 33602" />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: '123 Palm Ave, Tampa, FL 33602 apt 4' },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
