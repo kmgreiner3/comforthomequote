@@ -5,7 +5,7 @@
 // on screen as the rectangle Google's Static Maps API actually drew, and a
 // dragged pixel position converts back to the same real-world meters that
 // image pixel represents.
-import type { MapMeta } from './mapMeta';
+import type { LatLngCorner, MapMeta } from './mapMeta';
 
 // Web Mercator meters-per-pixel at zoom 0, equator (256px tiles) -- the same
 // constant app/api's computeOverlayZoom/buildMapMeta use.
@@ -120,4 +120,82 @@ export function shoelaceAreaM2(points: Array<{ dxMeters: number; dyMeters: numbe
 
 export function areaM2ToSqft(areaM2: number): number {
   return areaM2 * SQM_TO_SQFT;
+}
+
+// Convenience wrapper for a set of lat/lng corners (e.g. the no-solar-data
+// response's seedCorners, or the store's outlineCorners) against a given
+// mapMeta: projects to image pixels, then to meter-offsets, then shoelace.
+// Used by the trace-mode entry (feedback round 7) to seed the editor's
+// "already known" readout with the seed rectangle's own area, so there's no
+// jump the instant tracing starts (same reasoning as RoofOutlineEditor's own
+// `initialSqft` prop).
+export function areaSqftFromLatLngCorners(corners: LatLngCorner[], meta: MapMeta): number {
+  const metersPoints = corners.map(({ lat, lng }) => imagePxToMetersFromCenter(latLngToImagePx(lat, lng, meta), meta));
+  return areaM2ToSqft(shoelaceAreaM2(metersPoints));
+}
+
+// --- Self-intersection guard (feedback round 7, Task C item 4) ----------
+// Moving from 4 to 6 draggable points makes it possible to drag a midpoint
+// far enough to cross one of the polygon's own other edges (a "bowtie"),
+// which is not a coherent roof footprint. Detected via the standard
+// orientation + on-segment segment-intersection test, checked over every
+// pair of NON-ADJACENT edges (adjacent edges always share exactly one
+// endpoint by construction -- that's normal, not a crossing).
+
+// Orientation of the turn p -> q -> r: 0 collinear, positive/negative for
+// the two winding directions. Magnitudes below the epsilon are treated as
+// collinear to avoid floating-point noise flipping the sign spuriously.
+function orientation(p: ImagePoint, q: ImagePoint, r: ImagePoint): -1 | 0 | 1 {
+  const val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+  if (Math.abs(val) < 1e-7) return 0;
+  return val > 0 ? 1 : -1;
+}
+
+// Whether collinear point b lies within the bounding box of segment a-c
+// (only ever called once orientation has already confirmed collinearity).
+function onSegment(a: ImagePoint, b: ImagePoint, c: ImagePoint): boolean {
+  const EPS = 1e-7;
+  return (
+    Math.min(a.x, c.x) - EPS <= b.x &&
+    b.x <= Math.max(a.x, c.x) + EPS &&
+    Math.min(a.y, c.y) - EPS <= b.y &&
+    b.y <= Math.max(a.y, c.y) + EPS
+  );
+}
+
+function segmentsIntersect(p1: ImagePoint, q1: ImagePoint, p2: ImagePoint, q2: ImagePoint): boolean {
+  const o1 = orientation(p1, q1, p2);
+  const o2 = orientation(p1, q1, q2);
+  const o3 = orientation(p2, q2, p1);
+  const o4 = orientation(p2, q2, q1);
+
+  if (o1 !== o2 && o3 !== o4) return true;
+
+  // Collinear edge-cases: an endpoint sitting exactly on the other segment.
+  if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+  if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+  if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+  if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+
+  return false;
+}
+
+// True when the closed polygon (edges points[i] -> points[i+1], wrapping
+// back to points[0]) has any two non-adjacent edges crossing. Always false
+// for fewer than 4 points (a triangle can never self-intersect).
+export function polygonSelfIntersects(points: ImagePoint[]): boolean {
+  const n = points.length;
+  if (n < 4) return false;
+  for (let i = 0; i < n; i++) {
+    const p1 = points[i]!;
+    const q1 = points[(i + 1) % n]!;
+    for (let j = i + 1; j < n; j++) {
+      if (j === i + 1) continue; // shares vertex q1 === p2
+      if (i === 0 && j === n - 1) continue; // wrap-around adjacency
+      const p2 = points[j]!;
+      const q2 = points[(j + 1) % n]!;
+      if (segmentsIntersect(p1, q1, p2, q2)) return true;
+    }
+  }
+  return false;
 }

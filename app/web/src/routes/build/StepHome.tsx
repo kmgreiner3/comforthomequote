@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useBuild } from '../../state/build';
-import { AccuracyNotice, BackChevron, CheckMark, PrimaryButton, SecondaryLinkButton, StepHeading } from './ui';
+import {
+  AccuracyNotice,
+  BackChevron,
+  CheckMark,
+  PrimaryButton,
+  ProminentSecondaryButton,
+  StepHeading,
+} from './ui';
 import { RevealGroup, RevealItem } from './motion';
 import { getMeasurementAttempt, setMeasurementAttempt } from './measurementAttempt';
 import { formatFootprintSqft } from '../../lib/format';
-import { isMapMeta, type LatLngCorner, type MapMeta } from '../../lib/mapMeta';
+import { isLatLngCornerArray, isMapMeta, type LatLngCorner, type MapMeta } from '../../lib/mapMeta';
+import { areaSqftFromLatLngCorners } from '../../lib/mercator';
 import RoofOutlineEditor from './RoofOutlineEditor';
 import RoofOutlineOverlay from './RoofOutlineOverlay';
 
@@ -26,6 +34,14 @@ type Phase =
   // mapMeta/corners for the editor itself come from the store (the single
   // source of truth, feedback round 6), not from this phase.
   | { kind: 'editor'; sqft: number; imageUrl: string; adjusted: boolean }
+  // Entered on a {found:false, reason:"no-solar-data"} response that still
+  // came with imagery (feedback round 7, Task C item 2): there's a geocode
+  // and an aerial, just no Solar building measurement, so the homeowner
+  // traces the roof themselves instead of dead-ending into manual entry.
+  // mapMeta/corners for the editor come from the store (set via
+  // setSeedOutline the moment this phase is entered), same pattern as
+  // 'editor' above.
+  | { kind: 'trace'; imageUrl: string; mapMeta: MapMeta; corners: LatLngCorner[] }
   | { kind: 'form' }
   | { kind: 'outside-florida' };
 
@@ -38,13 +54,14 @@ type Phase =
 // keeps the exact, unrounded value for pricing.
 function isFoundResponse(
   data: unknown
-): data is { found: true; outlineSqft: number; imageUrl?: string; mapMeta?: MapMeta } {
+): data is { found: true; outlineSqft: number; imageUrl?: string; mapMeta?: MapMeta; formattedAddress?: string } {
   if (!data || typeof data !== 'object') return false;
   const d = data as Record<string, unknown>;
   if (d.found !== true) return false;
   if (typeof d.outlineSqft !== 'number' || !Number.isFinite(d.outlineSqft)) return false;
   if (d.imageUrl !== undefined && typeof d.imageUrl !== 'string') return false;
   if (d.mapMeta !== undefined && !isMapMeta(d.mapMeta)) return false;
+  if (d.formattedAddress !== undefined && typeof d.formattedAddress !== 'string') return false;
   return true;
 }
 
@@ -56,6 +73,42 @@ function isOutsideFloridaResponse(data: unknown): boolean {
   if (!data || typeof data !== 'object') return false;
   const d = data as Record<string, unknown>;
   return d.found === false && d.reason === 'outside-florida';
+}
+
+// {found:false, reason:"no-solar-data"} (feedback round 7, Task B item 2):
+// the geocode succeeded and it's in Florida, but Solar had no building data
+// at all. Still worth an aerial + a seed rectangle to trace from -- see
+// hasTraceImagery below, which decides whether this response actually has
+// enough to offer trace mode.
+function isNoSolarDataResponse(data: unknown): data is {
+  found: false;
+  reason: 'no-solar-data';
+  formattedAddress?: string;
+  imageUrl?: string;
+  mapMeta?: MapMeta;
+  seedCorners?: LatLngCorner[];
+} {
+  if (!data || typeof data !== 'object') return false;
+  const d = data as Record<string, unknown>;
+  if (d.found !== false || d.reason !== 'no-solar-data') return false;
+  if (d.formattedAddress !== undefined && typeof d.formattedAddress !== 'string') return false;
+  if (d.imageUrl !== undefined && typeof d.imageUrl !== 'string') return false;
+  if (d.mapMeta !== undefined && !isMapMeta(d.mapMeta)) return false;
+  if (d.seedCorners !== undefined && !isLatLngCornerArray(d.seedCorners)) return false;
+  return true;
+}
+
+// Trace mode needs all three of imageUrl/mapMeta/seedCorners to actually
+// render the editor -- a no-solar-data response missing any of them (e.g.
+// the aerial fetch itself failed, best-effort per measure.ts) has nothing
+// to trace, so it falls back to the plain manual form instead (same as any
+// other "not enough to work with" response).
+function hasTraceImagery(d: {
+  imageUrl?: string;
+  mapMeta?: MapMeta;
+  seedCorners?: LatLngCorner[];
+}): d is { imageUrl: string; mapMeta: MapMeta; seedCorners: LatLngCorner[] } {
+  return typeof d.imageUrl === 'string' && !!d.mapMeta && Array.isArray(d.seedCorners) && d.seedCorners.length >= 3;
 }
 
 // On mount, decide the starting phase without ever re-firing a fetch that
@@ -83,6 +136,9 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
         adjusted: false,
       };
     }
+    if (attempt.outcome === 'trace') {
+      return { kind: 'trace', imageUrl: attempt.imageUrl, mapMeta: attempt.mapMeta, corners: attempt.seedCorners };
+    }
     if (attempt.outcome === 'outside-florida') {
       return { kind: 'outside-florida' };
     }
@@ -98,6 +154,8 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   const setPropertyImageUrl = useBuild((s) => s.setPropertyImageUrl);
   const propertyImageUrl = useBuild((s) => s.propertyImageUrl);
   const setMeasuredMapMeta = useBuild((s) => s.setMeasuredMapMeta);
+  const setSeedOutline = useBuild((s) => s.setSeedOutline);
+  const adoptCanonicalAddress = useBuild((s) => s.adoptCanonicalAddress);
   // Single source of truth for the outline quad (feedback round 6): both
   // the confirm card's read-only overlay and the adjust-outline editor
   // render from these, never from local phase state, so they can never
@@ -130,6 +188,13 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     if (phase.kind === 'confirm') {
       setPropertyImageUrl(phase.imageUrl ?? null);
       setMeasuredMapMeta(phase.mapMeta ?? null);
+      setImgFailed(false);
+    } else if (phase.kind === 'trace') {
+      setPropertyImageUrl(phase.imageUrl);
+      // Trusts the response's own seedCorners verbatim rather than
+      // re-deriving from the mapMeta bbox (there is no real Solar bbox
+      // here) -- see setSeedOutline's own doc comment in state/build.ts.
+      setSeedOutline(phase.mapMeta, phase.corners);
       setImgFailed(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,8 +237,22 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
         }
         if (cancelled) return;
         if (isFoundResponse(data)) {
+          // The geocode's canonical formatted_address always includes the
+          // ZIP, unlike a Google suggestion description -- adopt it into
+          // the store now so the ZIP is present for later steps (feedback
+          // round 7, Task C item 1), without disturbing placeId/outline/
+          // mapMeta, which get set separately below/via the effect above.
+          // The cache entry below is keyed by this SAME canonical text
+          // (falling back to the address this fetch was actually sent
+          // for, when the response carries none) -- keying it by the
+          // pre-canonicalization text would make the at-most-once cache
+          // miss on the very next mount, since by then the store's own
+          // `address` (what a fresh mount's initialPhase() compares
+          // against) has already moved on to the canonical text.
+          const canonicalAddress = data.formattedAddress || (address as string);
+          if (data.formattedAddress) adoptCanonicalAddress(data.formattedAddress);
           setMeasurementAttempt({
-            address: address as string,
+            address: canonicalAddress,
             outcome: 'found',
             sqft: data.outlineSqft,
             ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
@@ -189,8 +268,25 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
         } else if (isOutsideFloridaResponse(data)) {
           setMeasurementAttempt({ address: address as string, outcome: 'outside-florida' });
           setPhase({ kind: 'outside-florida' });
+        } else if (isNoSolarDataResponse(data) && hasTraceImagery(data)) {
+          // Geocode succeeded, in Florida, but Solar had no building data --
+          // trace mode replaces the old manual dead-end (feedback round 7,
+          // Task C item 2) whenever there's enough imagery to trace from.
+          // Same canonical-address cache-key reasoning as the found branch
+          // above.
+          const canonicalAddress = data.formattedAddress || (address as string);
+          if (data.formattedAddress) adoptCanonicalAddress(data.formattedAddress);
+          setMeasurementAttempt({
+            address: canonicalAddress,
+            outcome: 'trace',
+            imageUrl: data.imageUrl,
+            mapMeta: data.mapMeta,
+            seedCorners: data.seedCorners,
+          });
+          setPhase({ kind: 'trace', imageUrl: data.imageUrl, mapMeta: data.mapMeta, corners: data.seedCorners });
         } else {
-          // {available:false} | {found:false, reason: anything else} |
+          // {available:false} | {found:false, reason: anything else,
+          // including a no-solar-data response with no usable imagery} |
           // anything malformed
           fallback();
         }
@@ -250,6 +346,15 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   function handleCancelAdjustOutline() {
     if (phase.kind !== 'editor') return;
     setPhase({ kind: 'confirm', sqft: phase.sqft, imageUrl: phase.imageUrl, mapMeta: mapMeta ?? undefined, adjusted: phase.adjusted });
+  }
+
+  // Trace mode's "Use this outline": there is no prior confirm phase to
+  // return to (found:false skipped it entirely) -- the traced footprint IS
+  // the confirmed measurement, tagged 'adjusted' same as any other
+  // homeowner-drawn outline (feedback round 7, Task C item 2).
+  function handleApplyTrace(sqft: number, corners: LatLngCorner[]) {
+    setOutlineAdjusted(sqft, corners);
+    onContinue();
   }
 
   if (phase.kind === 'loading') {
@@ -328,6 +433,36 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     );
   }
 
+  if (phase.kind === 'trace') {
+    return (
+      <RevealGroup>
+        <RevealItem>
+          <BackChevron onClick={onBack} />
+          <StepHeading
+            eyebrow="Your home"
+            title="Draw your roof outline"
+            subtitle="We could not measure this roof automatically. Drag the points so the outline covers your roof."
+          />
+        </RevealItem>
+
+        {mapMeta && outlineCorners && (
+          <RevealItem>
+            <RoofOutlineEditor
+              imageUrl={phase.imageUrl}
+              mapMeta={mapMeta}
+              corners={outlineCorners}
+              initialSqft={areaSqftFromLatLngCorners(outlineCorners, mapMeta)}
+              onApply={handleApplyTrace}
+              onCancel={handlePreferManual}
+              cancelLabel="Enter your home's footprint instead"
+              cancelVariant="link"
+            />
+          </RevealItem>
+        )}
+      </RevealGroup>
+    );
+  }
+
   if (phase.kind === 'confirm') {
     const canAdjustOutline = Boolean(mapMeta) && Boolean(outlineCorners) && Boolean(phase.imageUrl) && !imgFailed;
     return (
@@ -386,15 +521,23 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
           <AccuracyNotice className="mt-4 max-w-sm" />
         </RevealItem>
 
+        {canAdjustOutline && (
+          <RevealItem>
+            <p className="mt-6 max-w-sm text-sm text-ink/70">
+              Outline not covering your whole roof? <span className="font-semibold text-navy-950">Adjust it.</span>
+            </p>
+          </RevealItem>
+        )}
+
         <RevealItem>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             <PrimaryButton onClick={() => handleConfirmSatellite(phase.sqft, phase.adjusted)}>
               Looks right, continue
             </PrimaryButton>
             {canAdjustOutline && (
-              <SecondaryLinkButton type="button" onClick={handleAdjustOutline}>
+              <ProminentSecondaryButton type="button" onClick={handleAdjustOutline}>
                 Adjust outline
-              </SecondaryLinkButton>
+              </ProminentSecondaryButton>
             )}
           </div>
         </RevealItem>

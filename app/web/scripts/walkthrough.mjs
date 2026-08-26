@@ -47,17 +47,29 @@
 //      live /api/measure, the satellite confirm card (amber accuracy
 //      notice, "Adjust outline") is otherwise unreachable -- a dedicated
 //      fresh-context check mocks /api/measure (found:true + mapMeta) at
-//      both widths to screenshot it directly. The adjustable roof-outline
-//      editor itself is covered by RoofOutlineEditor's own component tests
-//      (pointer-event drag simulation), not here.
+//      both widths to screenshot it directly, and also drives a real
+//      pointer drag on one of the outline editor's points (feedback round
+//      6/7). The editor's own drag/geometry logic is covered by
+//      RoofOutlineEditor's own component tests, not here.
+//   7. Feedback round 7 (Task C): the outline editor's confirm card now
+//      shows a prominent "Outline not covering your whole roof? Adjust
+//      it." prompt with a bordered peer-weight button -- asserted on the
+//      same mocked found:true confirm card as item 6, and the outline
+//      editor there now renders 6 points (sw, w-mid, nw, ne, e-mid, se),
+//      asserted by count before the drag. A dedicated fresh-context check
+//      mocks a {found:false, reason:"no-solar-data"}
+//      response WITH imagery/seedCorners at both widths, and asserts the
+//      trace-the-roof editor renders (heading, body copy, all 6 seeded
+//      points, the small manual-entry escape hatch) and that "Use this
+//      outline" actually advances the wizard.
 //
 // Screenshots every /build step at 390x844 and 1280x800 (plus one extra:
-// the shingle step mid-selection on mobile, and the mocked satellite
-// confirm card with the amber notice at both widths), every /next step at
-// both widths (plus the partner step's documents section separately at
-// both widths), the landing/about pages at both widths, and the /metal
-// page at both widths (plus the open lightbox at 1280x800), all into
-// .superpowers/sdd/screens/.
+// the shingle step mid-selection on mobile, the mocked satellite confirm
+// card with the amber notice, and the mocked trace-mode editor, at both
+// widths), every /next step at both widths (plus the partner step's
+// documents section separately at both widths), the landing/about pages at
+// both widths, and the /metal page at both widths (plus the open lightbox
+// at 1280x800), all into .superpowers/sdd/screens/.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -479,6 +491,22 @@ async function checkSatelliteConfirmAmberNotice(browser, width, height) {
   await page.getByRole('button', { name: 'Adjust outline' }).waitFor({ timeout: 2000 });
   console.log(`  [satellite confirm @ ${width}x${height}] amber accuracy notice + Adjust outline both visible`);
 
+  // Feedback round 7 (Task C item 3): "Adjust outline" must read as a real
+  // peer action, not a quiet ghost link -- Kyle's reported bug. Asserts the
+  // prompt text renders, and that the button itself has real visual weight
+  // (a solid navy border), not the old quiet pill style.
+  await page
+    .getByText('Outline not covering your whole roof?')
+    .waitFor({ timeout: 2000 });
+  await page.getByText('Adjust it.').waitFor({ timeout: 2000 });
+  const adjustOutlineClass = await page.getByRole('button', { name: 'Adjust outline' }).getAttribute('class');
+  if (!adjustOutlineClass || !adjustOutlineClass.includes('border-2') || !adjustOutlineClass.includes('border-navy-950')) {
+    fail(
+      `[satellite confirm @ ${width}x${height}] expected "Adjust outline" to have a prominent bordered style (border-2 border-navy-950), got class="${adjustOutlineClass}"`
+    );
+  }
+  console.log(`  [satellite confirm @ ${width}x${height}] "Adjust it." prompt + prominent Adjust outline button verified`);
+
   // The mocked aerial image pushes the notice below the fold on shorter
   // viewports -- scroll it into view so the screenshot actually shows the
   // thing it exists to capture, not just the image above it.
@@ -501,10 +529,13 @@ const HOME_MAP_META = {
 // Feedback round 6: the reported bug was that adjusting the outline updated
 // the footprint number but the confirm card kept showing the ORIGINAL
 // rectangle. Drives a REAL pointer drag on one of the adjust-outline
-// editor's corner handles via Playwright's mouse API (a real browser has a
-// real PointerEvent, unlike jsdom, which has none at all -- that's why this
+// editor's handles via Playwright's mouse API (a real browser has a real
+// PointerEvent, unlike jsdom, which has none at all -- that's why this
 // lives here rather than only in a component test), applies it, and
-// screenshots the confirm card showing the quad has actually changed.
+// screenshots the confirm card showing the outline has actually changed.
+// Feedback round 7 (Task C item 4): the editor moved from 4 corners to 6
+// (sw, w-mid, nw, ne, e-mid, se) -- asserts all 6 render, then drags one of
+// them (see the corner-0 comment below for why a CORNER, not a midpoint).
 async function checkAdjustedOutlineOverlay(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
@@ -539,17 +570,32 @@ async function checkAdjustedOutlineOverlay(browser, width, height) {
   await page.getByRole('button', { name: 'Adjust outline' }).click();
   await page.getByText('Adjust the roof outline').waitFor({ timeout: 2000 });
 
+  // Exactly 6 draggable points now (sw, w-mid, nw, ne, e-mid, se), not 4.
+  const handleCount = await page.locator('[data-testid^="roof-outline-corner-"]').count();
+  if (handleCount !== 6) {
+    fail(`[adjusted overlay @ ${width}x${height}] expected 6 outline handles, found ${handleCount}`);
+  }
+
+  // Drags the sw corner (index 0, same role/offset the pre-round-7 version
+  // of this check used) -- this real captured mapMeta's building footprint
+  // is narrow east-west (the west/east edges, where w-mid/e-mid now sit,
+  // are only a few dozen CSS px apart at this container width), so a drag
+  // sized to comfortably clear both guards on a CORNER would send a
+  // MIDPOINT straight across to the opposite edge. Midpoint-specific
+  // dragging (tracing an L) is exercised precisely, against controlled
+  // fixtures, by RoofOutlineEditor.test.tsx and StepHome.test.tsx instead.
   const handle = page.getByTestId('roof-outline-corner-0');
   const box = await handle.boundingBox();
   if (!box) fail(`[adjusted overlay @ ${width}x${height}] could not locate corner handle 0's bounding box`);
 
   const startX = box.x + box.width / 2;
   const startY = box.y + box.height / 2;
-  // A modest inward drag -- big enough to visibly change the quad and the
-  // sq ft readout, comfortably clear of the out-of-range guard that
-  // disables "Use this outline" (RoofOutlineEditor.test.tsx's own fixtures
-  // need a full-image drag on all 4 corners to trip that; this is one
-  // corner, moved a small fraction of the frame).
+  // A modest inward drag -- big enough to visibly change the outline and
+  // the sq ft readout, comfortably clear of both the out-of-range guard
+  // and the self-intersection guard that disable "Use this outline"
+  // (RoofOutlineEditor.test.tsx's own fixtures need far more extreme drags
+  // to trip either; this is one corner, moved a small fraction of the
+  // frame).
   const endX = startX + 40;
   const endY = startY + 30;
 
@@ -560,7 +606,7 @@ async function checkAdjustedOutlineOverlay(browser, width, height) {
 
   const applyButton = page.getByRole('button', { name: 'Use this outline' });
   if (await applyButton.isDisabled()) {
-    fail(`[adjusted overlay @ ${width}x${height}] "Use this outline" unexpectedly disabled after a modest one-corner drag`);
+    fail(`[adjusted overlay @ ${width}x${height}] "Use this outline" unexpectedly disabled after a modest one-point drag`);
   }
   await applyButton.click();
 
@@ -577,6 +623,80 @@ async function checkAdjustedOutlineOverlay(browser, width, height) {
 
   await polygon.scrollIntoViewIfNeeded();
   await screenshotNamed(page, 'home-confirm-adjusted', width);
+
+  await context.close();
+}
+
+// Same bbox as HOME_MAP_META above, but expressed as the no-solar-data
+// response's own seedCorners (feedback round 7, Task B item 2/Task C item
+// 4): sw, w-mid, nw, ne, e-mid, se -- the 4 rectangle corners plus the
+// midpoints of the west/east edges.
+const SEED_MAP_META = HOME_MAP_META;
+const SEED_CORNERS = [
+  { lat: 27.3360897, lng: -82.5400199 }, // sw
+  { lat: 27.33623005, lng: -82.5400199 }, // w-mid
+  { lat: 27.3363704, lng: -82.5400199 }, // nw
+  { lat: 27.3363704, lng: -82.5399321 }, // ne
+  { lat: 27.33623005, lng: -82.5399321 }, // e-mid
+  { lat: 27.3360897, lng: -82.5399321 }, // se
+];
+
+// Feedback round 7 (Task C items 2 and 7): the no-solar-data trace flow.
+// Mocks /api/measure returning {found:false, reason:"no-solar-data"} WITH
+// imagery/mapMeta/seedCorners, and asserts the trace editor renders instead
+// of the old manual dead-end: the "Draw your roof outline" heading, the
+// body copy, all 6 seeded points, and the small manual-entry escape hatch
+// -- then drives "Use this outline" and confirms it actually advances the
+// wizard past the home step.
+async function checkTraceMode(browser, width, height) {
+  const context = await browser.newContext({ viewport: { width, height } });
+  const page = await context.newPage();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+
+  const mockImageUrl = `${BASE_URL}/mock-aerial-seed.png`;
+  await page.route('**/mock-aerial-seed.png', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(BLANK_PNG_BASE64, 'base64') })
+  );
+  await page.route('**/api/measure', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        found: false,
+        reason: 'no-solar-data',
+        formattedAddress: '1530 Main St, Sarasota, FL 34236, USA',
+        imageUrl: mockImageUrl,
+        mapMeta: SEED_MAP_META,
+        seedCorners: SEED_CORNERS,
+      }),
+    })
+  );
+
+  await page.goto(`${BASE_URL}/build`);
+  await waitForStep(page, 'address');
+  await page.getByLabel('Property address').fill('1530 Main St, Sarasota, FL 34236');
+  await page.getByRole('button', { name: 'Build My Roof' }).click();
+
+  await waitForStep(page, 'home');
+  await page.getByText('Draw your roof outline').waitFor({ timeout: 5000 });
+  await page
+    .getByText('We could not measure this roof automatically. Drag the points so the outline covers your roof.')
+    .waitFor({ timeout: 2000 });
+
+  const handleCount = await page.locator('[data-testid^="roof-outline-corner-"]').count();
+  if (handleCount !== 6) {
+    fail(`[trace mode @ ${width}x${height}] expected 6 seeded outline points, found ${handleCount}`);
+  }
+  await page.getByRole('button', { name: "Enter your home's footprint instead" }).waitFor({ timeout: 2000 });
+  console.log(
+    `  [trace mode @ ${width}x${height}] trace editor renders with 6 seeded points + manual-entry escape hatch`
+  );
+
+  await screenshotNamed(page, 'home-trace', width);
+
+  await page.getByRole('button', { name: 'Use this outline' }).click();
+  await waitForStep(page, 'shingle');
+  console.log(`  [trace mode @ ${width}x${height}] "Use this outline" advances the wizard past the home step`);
 
   await context.close();
 }
@@ -846,10 +966,17 @@ async function main() {
     await checkSatelliteConfirmAmberNotice(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
     // --- Feedback round 6: drive a real drag on the adjust-outline editor
-    //     and prove the confirm card's overlay actually changes. ---
+    //     and prove the confirm card's overlay actually changes. Feedback
+    //     round 7: now over 6 points instead of 4. ---
     console.log('\nAdjusted roof outline: real pointer drag, confirm card overlay changes...');
     await checkAdjustedOutlineOverlay(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
     await checkAdjustedOutlineOverlay(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
+
+    // --- Feedback round 7: the no-solar-data trace flow replaces the old
+    //     manual dead-end whenever there's imagery to trace from. ---
+    console.log('\nTrace mode: no-solar-data response with imagery (mocked /api/measure)...');
+    await checkTraceMode(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
+    await checkTraceMode(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
     await browser.close();
     console.log('\nAll assertions passed. Walkthrough complete.');

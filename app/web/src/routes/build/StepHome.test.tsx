@@ -314,14 +314,16 @@ describe('StepHome satellite measurement: adjustable roof outline editor (feedba
   });
 });
 
-// sw -> nw -> ne -> se, matching the store's outlineCorners ordering, for
-// MAP_META's bounding box.
-const BBOX_CORNERS = [
-  { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng },
-  { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng },
-  { lat: MAP_META.ne.lat, lng: MAP_META.ne.lng },
-  { lat: MAP_META.sw.lat, lng: MAP_META.ne.lng },
-];
+// sw -> w-mid -> nw -> ne -> e-mid -> se (feedback round 7), matching the
+// store's outlineCorners ordering, for MAP_META's bounding box.
+function midpoint(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+}
+const BBOX_SW = { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng };
+const BBOX_NW = { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng };
+const BBOX_NE = { lat: MAP_META.ne.lat, lng: MAP_META.ne.lng };
+const BBOX_SE = { lat: MAP_META.sw.lat, lng: MAP_META.ne.lng };
+const BBOX_CORNERS = [BBOX_SW, midpoint(BBOX_SW, BBOX_NW), BBOX_NW, BBOX_NE, midpoint(BBOX_NE, BBOX_SE), BBOX_SE];
 
 function bboxPointsAttr(): string {
   return BBOX_CORNERS.map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META))
@@ -741,5 +743,204 @@ describe('StepHome satellite measurement: at-most-once per address', () => {
     render(<StepHome onContinue={vi.fn()} onBack={vi.fn()} />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+});
+
+// Feedback round 7, Task C item 3: "Adjust outline" must read as a real
+// peer action, not a quiet ghost link -- Kyle's reported bug.
+describe('StepHome satellite measurement: prominent adjust-outline affordance (feedback round 7)', () => {
+  it('shows the "Adjust it." prompt above the buttons whenever adjusting is actually possible', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2000, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+
+    expect(
+      screen.getByText(
+        (_, element) => element?.tagName.toLowerCase() === 'p' && element.textContent === 'Outline not covering your whole roof? Adjust it.'
+      )
+    ).toBeTruthy();
+    const adjustButton = screen.getByRole('button', { name: 'Adjust outline' });
+    // A real bordered peer button (ProminentSecondaryButton), not the quiet
+    // pill-styled SecondaryLinkButton or a bare text link.
+    expect(adjustButton.className).toContain('border-2');
+    expect(adjustButton.className).toContain('border-navy-950');
+  });
+
+  it('omits the "Adjust it." prompt when there is nothing to adjust (no mapMeta)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 2000 }) }))
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+
+    expect(
+      screen.queryByText(
+        (_, element) => element?.tagName.toLowerCase() === 'p' && element.textContent === 'Outline not covering your whole roof? Adjust it.'
+      )
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Adjust outline' })).toBeNull();
+  });
+});
+
+// Feedback round 7, Task C item 1: the geocode's canonical formatted_address
+// always includes the ZIP, unlike a Google suggestion description. Once a
+// measurement succeeds, the store's address text is replaced with it.
+describe('StepHome satellite measurement: adopts the canonical formattedAddress (feedback round 7)', () => {
+  it('replaces the store address with formattedAddress on a found response, without touching placeId', async () => {
+    useBuild.getState().reset();
+    useBuild.getState().setAddress('8491 60th Street, Pinellas Park, FL, USA', 'places/abc123');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({
+            found: true,
+            outlineSqft: 1900,
+            formattedAddress: '8491 60th St, Pinellas Park, FL 33781, USA',
+          }),
+        })
+      )
+    );
+
+    render(<StepHome onContinue={vi.fn()} onBack={vi.fn()} />);
+    await screen.findByText('We found your roof.');
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('8491 60th St, Pinellas Park, FL 33781, USA');
+    expect(s.placeId).toBe('places/abc123');
+  });
+
+  it('leaves the store address alone when the response omits formattedAddress', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 1900 }) }))
+    );
+    setup('123 Palm Ave, Tampa, FL');
+    await screen.findByText('We found your roof.');
+
+    expect(useBuild.getState().address).toBe('123 Palm Ave, Tampa, FL');
+  });
+});
+
+// Feedback round 7, Task C item 2: a no-solar-data response with imagery
+// replaces the old manual dead-end with a trace-the-roof editor.
+describe('StepHome satellite measurement: trace mode (feedback round 7, no Solar data)', () => {
+  const SEED_MAP_META = {
+    centerLat: 27.10005,
+    centerLng: -82.09995,
+    zoom: 20,
+    sw: { lat: 27.1, lng: -82.1 },
+    ne: { lat: 27.1001, lng: -82.0999 },
+    imgW: 1280,
+    imgH: 800,
+  };
+  function midpoint(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+    return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+  }
+  function seedCornersFor(meta: typeof SEED_MAP_META) {
+    const sw = { lat: meta.sw.lat, lng: meta.sw.lng };
+    const nw = { lat: meta.ne.lat, lng: meta.sw.lng };
+    const ne = { lat: meta.ne.lat, lng: meta.ne.lng };
+    const se = { lat: meta.sw.lat, lng: meta.ne.lng };
+    return [sw, midpoint(sw, nw), nw, ne, midpoint(ne, se), se];
+  }
+  const SEED_CORNERS = seedCornersFor(SEED_MAP_META);
+  const NO_SOLAR_RESPONSE = {
+    found: false,
+    reason: 'no-solar-data',
+    formattedAddress: '123 Palm Ave, Tampa, FL 33602, USA',
+    imageUrl: 'https://x/seed.png',
+    mapMeta: SEED_MAP_META,
+    seedCorners: SEED_CORNERS,
+  };
+
+  it('renders the trace editor (heading, body copy, seed outline) instead of the manual form', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: async () => NO_SOLAR_RESPONSE })));
+    setup();
+
+    await screen.findByText('Draw your roof outline');
+    expect(
+      screen.getByText(
+        'We could not measure this roof automatically. Drag the points so the outline covers your roof.'
+      )
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use this outline' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: "Enter your home's footprint instead" })).toBeTruthy();
+    expect(screen.queryByLabelText('Home footprint (sq ft)')).toBeNull();
+
+    // Adopts the canonical formattedAddress too, same as the found path.
+    expect(useBuild.getState().address).toBe('123 Palm Ave, Tampa, FL 33602, USA');
+    // 6 draggable points seeded directly from seedCorners.
+    for (let i = 0; i < 6; i++) {
+      expect(screen.getByTestId(`roof-outline-corner-${i}`)).toBeTruthy();
+    }
+  });
+
+  it('"Use this outline" commits the traced footprint as outlineSource=adjusted and continues', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: async () => NO_SOLAR_RESPONSE })));
+    const { onContinue } = setup();
+
+    await screen.findByText('Draw your roof outline');
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    const s = useBuild.getState();
+    expect(s.outlineSource).toBe('adjusted');
+    expect(s.outlineSqft).not.toBeNull();
+    expect(s.outlineCorners).toHaveLength(6);
+  });
+
+  it('"Enter your home\'s footprint instead" falls through to the manual form, same guard as the confirm card\'s manual link', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: async () => NO_SOLAR_RESPONSE })));
+    setup();
+
+    await screen.findByText('Draw your roof outline');
+    fireEvent.click(screen.getByRole('button', { name: "Enter your home's footprint instead" }));
+
+    const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(useBuild.getState().propertyImageUrl).toBeNull();
+  });
+
+  it('falls back to the manual form when no-solar-data is missing imagery to trace from', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: false, reason: 'no-solar-data', formattedAddress: 'x' }),
+        })
+      )
+    );
+    setup();
+
+    const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(screen.queryByText('Draw your roof outline')).toBeNull();
+  });
+
+  it('does not re-fetch on remount for the same address once a trace outcome is cached', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: async () => NO_SOLAR_RESPONSE }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    setup();
+    await screen.findByText('Draw your roof outline');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    render(<StepHome onContinue={vi.fn()} onBack={vi.fn()} />);
+
+    await screen.findByText('Draw your roof outline');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

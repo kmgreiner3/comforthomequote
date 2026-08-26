@@ -13,12 +13,17 @@
  * even desirable, for a brand new session to get one fresh attempt.
  */
 
-import { isMapMeta, type MapMeta } from '../../lib/mapMeta';
+import { isLatLngCornerArray, isMapMeta, type LatLngCorner, type MapMeta } from '../../lib/mapMeta';
 
 const STORAGE_KEY = 'chq-measure-attempt-v1';
 
 export type MeasurementAttempt =
   | { address: string; outcome: 'found'; sqft: number; imageUrl?: string; mapMeta?: MapMeta }
+  // Geocode succeeded, in Florida, but Solar had no building data -- there's
+  // still an aerial + a plausible starting rectangle to trace from (feedback
+  // round 7, Task C item 2), so this gets its own cached outcome rather than
+  // falling into 'fallback' (which means "go straight to the manual form").
+  | { address: string; outcome: 'trace'; imageUrl: string; mapMeta: MapMeta; seedCorners: LatLngCorner[] }
   | { address: string; outcome: 'outside-florida' }
   | { address: string; outcome: 'fallback' };
 
@@ -39,6 +44,13 @@ export function getMeasurementAttempt(): MeasurementAttempt | null {
         ...(typeof imageUrl === 'string' ? { imageUrl } : {}),
         ...(isMapMeta(mapMeta) ? { mapMeta } : {}),
       };
+    }
+    if (parsed.outcome === 'trace') {
+      const imageUrl = (parsed as { imageUrl?: unknown }).imageUrl;
+      const mapMeta = (parsed as { mapMeta?: unknown }).mapMeta;
+      const seedCorners = (parsed as { seedCorners?: unknown }).seedCorners;
+      if (typeof imageUrl !== 'string' || !isMapMeta(mapMeta) || !isLatLngCornerArray(seedCorners)) return null;
+      return { address: parsed.address, outcome: 'trace', imageUrl, mapMeta, seedCorners };
     }
     if (parsed.outcome === 'outside-florida') {
       return { address: parsed.address, outcome: 'outside-florida' };

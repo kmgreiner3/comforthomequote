@@ -69,22 +69,25 @@ const LARGE_AREA_MAP_META: MapMeta = {
   imgH: 800,
 };
 
-// Corner order matches the store's outlineCorners / RoofOutlineEditor's
-// `corners` prop: sw, nw, ne, se.
-const INITIAL_LATLNG_CORNERS = [
-  { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng },
-  { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng },
-  { lat: MAP_META.ne.lat, lng: MAP_META.ne.lng },
-  { lat: MAP_META.sw.lat, lng: MAP_META.ne.lng },
-];
+function midpoint(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+}
+
+// 6-point order matches the store's outlineCorners / RoofOutlineEditor's
+// `corners` prop (feedback round 7, Task C item 4): sw, w-mid, nw, ne,
+// e-mid, se.
+function sixPointCorners(meta: MapMeta) {
+  const sw = { lat: meta.sw.lat, lng: meta.sw.lng };
+  const nw = { lat: meta.ne.lat, lng: meta.sw.lng };
+  const ne = { lat: meta.ne.lat, lng: meta.ne.lng };
+  const se = { lat: meta.sw.lat, lng: meta.ne.lng };
+  return [sw, midpoint(sw, nw), nw, ne, midpoint(ne, se), se];
+}
+
+const INITIAL_LATLNG_CORNERS = sixPointCorners(MAP_META);
 const INITIAL_PX = INITIAL_LATLNG_CORNERS.map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META));
 
-const LARGE_AREA_LATLNG_CORNERS = [
-  { lat: LARGE_AREA_MAP_META.sw.lat, lng: LARGE_AREA_MAP_META.sw.lng },
-  { lat: LARGE_AREA_MAP_META.ne.lat, lng: LARGE_AREA_MAP_META.sw.lng },
-  { lat: LARGE_AREA_MAP_META.ne.lat, lng: LARGE_AREA_MAP_META.ne.lng },
-  { lat: LARGE_AREA_MAP_META.sw.lat, lng: LARGE_AREA_MAP_META.ne.lng },
-];
+const LARGE_AREA_LATLNG_CORNERS = sixPointCorners(LARGE_AREA_MAP_META);
 const LARGE_AREA_INITIAL_PX = LARGE_AREA_LATLNG_CORNERS.map(({ lat, lng }) =>
   latLngToImagePx(lat, lng, LARGE_AREA_MAP_META)
 );
@@ -146,7 +149,8 @@ describe('RoofOutlineEditor', () => {
 
     // Sanity: confirm the bbox rectangle's own geometric area really is a
     // different (rounded) number -- otherwise this test wouldn't be
-    // exercising the fix at all.
+    // exercising the fix at all. The two extra midpoints sit exactly on
+    // the west/east edges, so they don't change the rectangle's own area.
     const bboxArea = sqftFor(INITIAL_PX);
     expect(bboxArea).toBeCloseTo(3229.17, -1);
     expect(formatFootprintSqft(storedSqft)).not.toBe(formatFootprintSqft(bboxArea));
@@ -174,7 +178,7 @@ describe('RoofOutlineEditor', () => {
     firePointer(handle0, 'pointerdown', { pointerId: 1, clientX: start.x, clientY: start.y });
     firePointer(handle0, 'pointermove', { pointerId: 1, clientX: moved.x, clientY: moved.y });
 
-    const expectedLiveSqft = sqftFor([moved, INITIAL_PX[1]!, INITIAL_PX[2]!, INITIAL_PX[3]!]);
+    const expectedLiveSqft = sqftFor([moved, ...INITIAL_PX.slice(1)]);
     expect(screen.getByTestId('roof-outline-live-sqft').textContent).toBe(
       `About ${formatFootprintSqft(expectedLiveSqft)} sq ft`
     );
@@ -182,15 +186,10 @@ describe('RoofOutlineEditor', () => {
   });
 
   it('seeds its internal drag-state corners from the `corners` prop, not the mapMeta bbox (reopening after a prior adjustment)', () => {
-    // A quad shifted well away from the bbox -- simulating the store's
+    // A hexagon shifted well away from the bbox -- simulating the store's
     // outlineCorners already holding a prior homeowner adjustment when the
     // editor is reopened.
-    const grown = [
-      { lat: MAP_META.sw.lat - 0.00002, lng: MAP_META.sw.lng - 0.00002 },
-      { lat: MAP_META.ne.lat + 0.00002, lng: MAP_META.sw.lng - 0.00002 },
-      { lat: MAP_META.ne.lat + 0.00002, lng: MAP_META.ne.lng + 0.00002 },
-      { lat: MAP_META.sw.lat - 0.00002, lng: MAP_META.ne.lng + 0.00002 },
-    ];
+    const grown = INITIAL_LATLNG_CORNERS.map(({ lat, lng }) => ({ lat: lat - 0.00002, lng: lng - 0.00002 }));
     const grownPx = grown.map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META));
 
     render(
@@ -204,17 +203,17 @@ describe('RoofOutlineEditor', () => {
       />
     );
 
-    // Drag corner 1 (untouched by the `grown` shift above) by a small,
-    // fixed amount -- the resulting LIVE sqft must reflect corner 1 moving
-    // relative to the GROWN quad's other 3 corners, not the original
-    // bbox's, proving the internal pixel state was seeded from `corners`.
+    // Drag corner 1 (w-mid) by a small, fixed amount -- the resulting LIVE
+    // sqft must reflect corner 1 moving relative to the GROWN hexagon's
+    // other 5 points, not the original bbox's, proving the internal pixel
+    // state was seeded from `corners`.
     const handle1 = screen.getByTestId('roof-outline-corner-1');
     const start = grownPx[1]!;
     firePointer(handle1, 'pointerdown', { pointerId: 1, clientX: start.x, clientY: start.y });
     const moved = { x: start.x + 5, y: start.y - 5 };
     firePointer(handle1, 'pointermove', { pointerId: 1, clientX: moved.x, clientY: moved.y });
 
-    const expectedSqft = sqftFor([grownPx[0]!, moved, grownPx[2]!, grownPx[3]!]);
+    const expectedSqft = sqftFor([grownPx[0]!, moved, ...grownPx.slice(2)]);
     expect(screen.getByTestId('roof-outline-live-sqft').textContent).toBe(
       `About ${formatFootprintSqft(expectedSqft)} sq ft`
     );
@@ -237,17 +236,17 @@ describe('RoofOutlineEditor', () => {
 
     firePointer(handle0, 'pointerdown', { pointerId: 1, clientX: start.x, clientY: start.y });
     // Drag the SW corner 100 image-px further out (both axes), growing the
-    // quad -- pointer capture isn't available in jsdom, but the component
+    // shape -- pointer capture isn't available in jsdom, but the component
     // guards that with optional chaining and still updates state directly.
     const moved = { x: start.x - 100, y: start.y + 100 };
     firePointer(handle0, 'pointermove', { pointerId: 1, clientX: moved.x, clientY: moved.y });
     firePointer(handle0, 'pointerup', { pointerId: 1, clientX: moved.x, clientY: moved.y });
 
-    const expectedSqft = sqftFor([moved, INITIAL_PX[1]!, INITIAL_PX[2]!, INITIAL_PX[3]!]);
+    const expectedSqft = sqftFor([moved, ...INITIAL_PX.slice(1)]);
     expect(screen.getByTestId('roof-outline-live-sqft').textContent).toBe(
       `About ${formatFootprintSqft(expectedSqft)} sq ft`
     );
-    // Growing the quad outward must increase the footprint vs. the initial one.
+    // Growing the shape outward must increase the footprint vs. the initial one.
     expect(expectedSqft).toBeGreaterThan(sqftFor(INITIAL_PX));
   });
 
@@ -289,7 +288,7 @@ describe('RoofOutlineEditor', () => {
 
     firePointer(handle0, 'pointerdown', { pointerId: 1, clientX: -5000, clientY: -5000 });
 
-    const expectedSqft = sqftFor([{ x: 0, y: 0 }, INITIAL_PX[1]!, INITIAL_PX[2]!, INITIAL_PX[3]!]);
+    const expectedSqft = sqftFor([{ x: 0, y: 0 }, ...INITIAL_PX.slice(1)]);
     expect(screen.getByTestId('roof-outline-live-sqft').textContent).toBe(
       `About ${formatFootprintSqft(expectedSqft)} sq ft`
     );
@@ -316,15 +315,15 @@ describe('RoofOutlineEditor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
 
-    const expectedSqft = sqftFor([moved, INITIAL_PX[1]!, INITIAL_PX[2]!, INITIAL_PX[3]!]);
+    const expectedSqft = sqftFor([moved, ...INITIAL_PX.slice(1)]);
     expect(onApply).toHaveBeenCalledTimes(1);
     const [sqftArg, cornersArg] = onApply.mock.calls[0]!;
     expect(sqftArg).toBeCloseTo(expectedSqft, 2);
     expect(sqftArg).not.toBeCloseTo(PLACEHOLDER_INITIAL_SQFT, 0);
     // The applied corners round-trip back (via the same mercator math) to
     // the dragged pixel positions -- proving onApply's second argument is
-    // the ACTUAL adjusted quad, not the original bbox.
-    expect(cornersArg).toHaveLength(4);
+    // the ACTUAL adjusted shape, not the original bbox.
+    expect(cornersArg).toHaveLength(6);
     const roundTripped = (cornersArg as Array<{ lat: number; lng: number }>).map(({ lat, lng }) =>
       latLngToImagePx(lat, lng, MAP_META)
     );
@@ -376,7 +375,7 @@ describe('RoofOutlineEditor', () => {
     expect(onApply).not.toHaveBeenCalled();
   });
 
-  it('renders exactly 4 draggable corner handles', () => {
+  it('defaults to a "Cancel" bordered button (the confirm card\'s Adjust-outline flow)', () => {
     render(
       <RoofOutlineEditor
         imageUrl="aerial.png"
@@ -387,8 +386,76 @@ describe('RoofOutlineEditor', () => {
         onCancel={vi.fn()}
       />
     );
-    for (let i = 0; i < 4; i++) {
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    expect(cancelButton.className).toContain('rounded-full');
+    expect(cancelButton.className).toContain('border');
+  });
+
+  it('renders a custom cancelLabel as a quiet text link when cancelVariant="link" (the trace-mode manual-entry escape hatch)', () => {
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        initialSqft={PLACEHOLDER_INITIAL_SQFT}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+        cancelLabel="Enter your home's footprint instead"
+        cancelVariant="link"
+      />
+    );
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    const link = screen.getByRole('button', { name: "Enter your home's footprint instead" });
+    expect(link.className).not.toContain('rounded-full');
+    expect(link.className).toContain('underline-offset-2');
+  });
+
+  it('renders exactly 6 draggable points, ordered sw, w-mid, nw, ne, e-mid, se', () => {
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        initialSqft={PLACEHOLDER_INITIAL_SQFT}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    for (let i = 0; i < 6; i++) {
       expect(screen.getByTestId(`roof-outline-corner-${i}`)).toBeTruthy();
+    }
+    expect(screen.queryByTestId('roof-outline-corner-6')).toBeNull();
+  });
+
+  // Kyle: the previous 4-corner circles were too big. The hit AREA (the
+  // draggable div) stays ~28px so touch dragging is still comfortable, but
+  // the VISIBLE dot inside it shrinks to ~14px.
+  it('each handle has a ~28px hit area (h-7 w-7) with a ~14px visible dot (h-3.5 w-3.5) inside it', () => {
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        initialSqft={PLACEHOLDER_INITIAL_SQFT}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    for (let i = 0; i < 6; i++) {
+      const handle = screen.getByTestId(`roof-outline-corner-${i}`);
+      expect(handle.className).toContain('h-7');
+      expect(handle.className).toContain('w-7');
+      // The hit area itself must be visually transparent -- only the inner
+      // dot is the border/bg-carrying visible circle.
+      expect(handle.className).not.toContain('border');
+      expect(handle.className).not.toContain('bg-white');
+
+      const dot = handle.querySelector('span');
+      expect(dot).toBeTruthy();
+      expect(dot!.className).toContain('h-3.5');
+      expect(dot!.className).toContain('w-3.5');
+      expect(dot!.className).toContain('rounded-full');
+      expect(dot!.className).toContain('border-blue-600');
     }
   });
 
@@ -405,33 +472,28 @@ describe('RoofOutlineEditor', () => {
       />
     );
 
-    // Drag all 4 corners out to their own quadrant's image corner (sw->
-    // bottom-left, nw->top-left, ne->top-right, se->bottom-right) so the
-    // quad stays simple/convex (not a self-intersecting bowtie) while
-    // growing to roughly the full 1280x800 image -- @chq/pricing's
-    // sqFromOutline only accepts (0, 20000], and the full image frames
-    // well beyond just the building (FRAMING_PADDING), so this quad is
-    // well outside that range.
+    // Drag all 6 points out to the full 1280x800 image, keeping the shape a
+    // simple (non-self-intersecting) hexagon -- the west-edge points (sw,
+    // w-mid, nw) go to the left edge, the east-edge points (ne, e-mid, se)
+    // go to the right edge -- so this exercises the AREA guard specifically,
+    // not the self-intersection one. @chq/pricing's sqFromOutline only
+    // accepts (0, 20000], and the full image frames well beyond just the
+    // building (FRAMING_PADDING), so this shape is well outside that range.
     const { imgW, imgH } = LARGE_AREA_MAP_META;
-    firePointer(screen.getByTestId('roof-outline-corner-0'), 'pointerdown', {
-      pointerId: 1,
-      clientX: 0,
-      clientY: imgH,
-    });
-    firePointer(screen.getByTestId('roof-outline-corner-1'), 'pointerdown', {
-      pointerId: 2,
-      clientX: 0,
-      clientY: 0,
-    });
-    firePointer(screen.getByTestId('roof-outline-corner-2'), 'pointerdown', {
-      pointerId: 3,
-      clientX: imgW,
-      clientY: 0,
-    });
-    firePointer(screen.getByTestId('roof-outline-corner-3'), 'pointerdown', {
-      pointerId: 4,
-      clientX: imgW,
-      clientY: imgH,
+    const extremes = [
+      { x: 0, y: imgH }, // sw
+      { x: 0, y: imgH / 2 }, // w-mid
+      { x: 0, y: 0 }, // nw
+      { x: imgW, y: 0 }, // ne
+      { x: imgW, y: imgH / 2 }, // e-mid
+      { x: imgW, y: imgH }, // se
+    ];
+    extremes.forEach((p, i) => {
+      firePointer(screen.getByTestId(`roof-outline-corner-${i}`), 'pointerdown', {
+        pointerId: i + 1,
+        clientX: p.x,
+        clientY: p.y,
+      });
     });
 
     const button = screen.getByRole('button', { name: 'Use this outline' }) as HTMLButtonElement;
@@ -439,6 +501,7 @@ describe('RoofOutlineEditor', () => {
     expect(
       screen.getByText("That outline isn't a realistic footprint. Drag the corners closer to your roof.")
     ).toBeTruthy();
+    expect(screen.queryByText('That outline crosses itself. Move the points so the edges do not overlap.')).toBeNull();
 
     fireEvent.click(button);
     expect(onApply).not.toHaveBeenCalled();
@@ -458,11 +521,13 @@ describe('RoofOutlineEditor', () => {
     );
 
     const { imgW, imgH } = LARGE_AREA_MAP_META;
-    const handles = [0, 1, 2, 3].map((i) => screen.getByTestId(`roof-outline-corner-${i}`));
+    const handles = [0, 1, 2, 3, 4, 5].map((i) => screen.getByTestId(`roof-outline-corner-${i}`));
     const extremes = [
       { x: 0, y: imgH },
+      { x: 0, y: imgH / 2 },
       { x: 0, y: 0 },
       { x: imgW, y: 0 },
+      { x: imgW, y: imgH / 2 },
       { x: imgW, y: imgH },
     ];
     handles.forEach((handle, i) => {
@@ -470,10 +535,10 @@ describe('RoofOutlineEditor', () => {
     });
     expect((screen.getByRole('button', { name: 'Use this outline' }) as HTMLButtonElement).disabled).toBe(true);
 
-    // Drag every corner back to its original bbox-derived position. Using
-    // a fresh pointerdown per corner (rather than pointermove) sidesteps
-    // needing to track which single corner index is "currently dragging" --
-    // pointerdown itself snaps that corner to the given position.
+    // Drag every point back to its original bbox-derived position. Using a
+    // fresh pointerdown per point (rather than pointermove) sidesteps
+    // needing to track which single point index is "currently dragging" --
+    // pointerdown itself snaps that point to the given position.
     handles.forEach((handle, i) => {
       const p = LARGE_AREA_INITIAL_PX[i]!;
       firePointer(handle, 'pointerdown', { pointerId: i + 1, clientX: p.x, clientY: p.y });
@@ -483,5 +548,96 @@ describe('RoofOutlineEditor', () => {
     expect(button.disabled).toBe(false);
     fireEvent.click(button);
     expect(onApply).toHaveBeenCalledTimes(1);
+  });
+
+  // Feedback round 7 (Task C item 4): 6 points make it possible to drag a
+  // midpoint far enough to cross another edge -- a "bowtie" that isn't a
+  // coherent roof footprint.
+  describe('self-intersection guard', () => {
+    it('disables "Use this outline" and shows the crossing warning once a drag makes the outline cross itself', () => {
+      const onApply = vi.fn();
+      render(
+        <RoofOutlineEditor
+          imageUrl="aerial.png"
+          mapMeta={MAP_META}
+          corners={INITIAL_LATLNG_CORNERS}
+          initialSqft={PLACEHOLDER_INITIAL_SQFT}
+          onApply={onApply}
+          onCancel={vi.fn()}
+        />
+      );
+
+      // Drag w-mid (index 1) far past the east edge (ne/e-mid/se's x) --
+      // this makes edge (sw -> w-mid) cross edge (e-mid -> se), a bowtie,
+      // per the worked example in mercator.test.ts's own self-intersection
+      // fixture.
+      const handle1 = screen.getByTestId('roof-outline-corner-1');
+      const eastX = Math.max(INITIAL_PX[3]!.x, INITIAL_PX[4]!.x, INITIAL_PX[5]!.x);
+      const wMidStart = INITIAL_PX[1]!;
+      firePointer(handle1, 'pointerdown', {
+        pointerId: 1,
+        clientX: eastX + 40,
+        clientY: wMidStart.y,
+      });
+
+      const button = screen.getByRole('button', { name: 'Use this outline' }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(
+        screen.getByText('That outline crosses itself. Move the points so the edges do not overlap.')
+      ).toBeTruthy();
+
+      fireEvent.click(button);
+      expect(onApply).not.toHaveBeenCalled();
+    });
+
+    it('re-enables "Use this outline" once the crossing point is dragged back to a simple shape', () => {
+      render(
+        <RoofOutlineEditor
+          imageUrl="aerial.png"
+          mapMeta={MAP_META}
+          corners={INITIAL_LATLNG_CORNERS}
+          initialSqft={PLACEHOLDER_INITIAL_SQFT}
+          onApply={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      );
+
+      const handle1 = screen.getByTestId('roof-outline-corner-1');
+      const eastX = Math.max(INITIAL_PX[3]!.x, INITIAL_PX[4]!.x, INITIAL_PX[5]!.x);
+      const wMidStart = INITIAL_PX[1]!;
+      firePointer(handle1, 'pointerdown', { pointerId: 1, clientX: eastX + 40, clientY: wMidStart.y });
+      expect((screen.getByRole('button', { name: 'Use this outline' }) as HTMLButtonElement).disabled).toBe(true);
+
+      firePointer(handle1, 'pointerdown', { pointerId: 1, clientX: wMidStart.x, clientY: wMidStart.y });
+
+      expect(screen.queryByText('That outline crosses itself. Move the points so the edges do not overlap.')).toBeNull();
+      expect((screen.getByRole('button', { name: 'Use this outline' }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('a moderate drag that traces an L-shape (dragging a midpoint inward) never trips the crossing guard', () => {
+      render(
+        <RoofOutlineEditor
+          imageUrl="aerial.png"
+          mapMeta={MAP_META}
+          corners={INITIAL_LATLNG_CORNERS}
+          initialSqft={PLACEHOLDER_INITIAL_SQFT}
+          onApply={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      );
+
+      // Drag e-mid (index 4) modestly inward, toward the center -- exactly
+      // the "drag a mid point inward to trace an L" motion the 6-point
+      // layout exists for.
+      const handle4 = screen.getByTestId('roof-outline-corner-4');
+      const start = INITIAL_PX[4]!;
+      const center = { x: (INITIAL_PX[0]!.x + INITIAL_PX[3]!.x) / 2, y: (INITIAL_PX[0]!.y + INITIAL_PX[3]!.y) / 2 };
+      const moved = { x: start.x + (center.x - start.x) * 0.4, y: start.y };
+      firePointer(handle4, 'pointerdown', { pointerId: 1, clientX: start.x, clientY: start.y });
+      firePointer(handle4, 'pointermove', { pointerId: 1, clientX: moved.x, clientY: moved.y });
+
+      expect(screen.queryByText('That outline crosses itself. Move the points so the edges do not overlap.')).toBeNull();
+      expect((screen.getByRole('button', { name: 'Use this outline' }) as HTMLButtonElement).disabled).toBe(false);
+    });
   });
 });

@@ -36,7 +36,31 @@ function expectedPointsAttr(corners: typeof BBOX_CORNERS, meta: MapMeta): string
     .join(' ');
 }
 
+// sw, w-mid, nw, ne, e-mid, se (feedback round 7, Task C item 4): the
+// current 6-point outline shape, so this shared renderer is proven against
+// the actual n-gon it now always receives, not just a 4-point rectangle.
+function midpoint(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+}
+const SIX_POINT_CORNERS = [
+  BBOX_CORNERS[0]!,
+  midpoint(BBOX_CORNERS[0]!, BBOX_CORNERS[1]!),
+  BBOX_CORNERS[1]!,
+  BBOX_CORNERS[2]!,
+  midpoint(BBOX_CORNERS[2]!, BBOX_CORNERS[3]!),
+  BBOX_CORNERS[3]!,
+];
+
 describe('RoofOutlineOverlay', () => {
+  it('golden: renders a 6-point polygon (sw, w-mid, nw, ne, e-mid, se) matching the shared mercator math', () => {
+    const { container } = render(
+      <RoofOutlineOverlay imageUrl="aerial.png" alt="Aerial view" mapMeta={MAP_META} corners={SIX_POINT_CORNERS} />
+    );
+    const polygon = container.querySelector('polygon');
+    expect(polygon?.getAttribute('points')?.split(' ')).toHaveLength(6);
+    expect(polygon?.getAttribute('points')).toBe(expectedPointsAttr(SIX_POINT_CORNERS, MAP_META));
+  });
+
   it('golden: the viewBox is exactly mapMeta.imgW x imgH', () => {
     const { container } = render(
       <RoofOutlineOverlay imageUrl="aerial.png" alt="Aerial view" mapMeta={MAP_META} corners={BBOX_CORNERS} />
