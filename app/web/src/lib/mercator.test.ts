@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   areaM2ToSqft,
+  imagePxToLatLng,
   imagePxToMetersFromCenter,
   latLngToImagePx,
   metersPerImagePixel,
@@ -129,5 +130,32 @@ describe('latLngToImagePx + imagePxToMetersFromCenter: roundtrip', () => {
 
     const areaM2 = shoelaceAreaM2(metersCorners);
     expect(areaM2).toBeCloseTo(300, 0); // ~20m x 15m = 300 m2, within rounding
+  });
+});
+
+// imagePxToLatLng: exact inverse of latLngToImagePx (feedback round 6 --
+// needed so a dragged corner, tracked in image-pixel space, can be
+// persisted back as the lat/lng the store's outlineCorners keeps).
+describe('imagePxToLatLng: exact inverse of latLngToImagePx', () => {
+  it('the image center pixel maps back to the map center lat/lng', () => {
+    const { lat, lng } = imagePxToLatLng({ x: BASE_META.imgW / 2, y: BASE_META.imgH / 2 }, BASE_META);
+    expect(lat).toBeCloseTo(BASE_META.centerLat, 9);
+    expect(lng).toBeCloseTo(BASE_META.centerLng, 9);
+  });
+
+  it('round-trips a bbox corner: latLngToImagePx then imagePxToLatLng returns the original lat/lng', () => {
+    const corner = { lat: BASE_META.ne.lat, lng: BASE_META.ne.lng };
+    const px = latLngToImagePx(corner.lat, corner.lng, BASE_META);
+    const roundTripped = imagePxToLatLng(px, BASE_META);
+    expect(roundTripped.lat).toBeCloseTo(corner.lat, 9);
+    expect(roundTripped.lng).toBeCloseTo(corner.lng, 9);
+  });
+
+  it('round-trips an arbitrary dragged-looking pixel position (not just a bbox corner)', () => {
+    const px = { x: 940.25, y: 210.75 };
+    const { lat, lng } = imagePxToLatLng(px, BASE_META);
+    const back = latLngToImagePx(lat, lng, BASE_META);
+    expect(back.x).toBeCloseTo(px.x, 6);
+    expect(back.y).toBeCloseTo(px.y, 6);
   });
 });

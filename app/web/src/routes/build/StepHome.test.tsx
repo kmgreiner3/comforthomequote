@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { useBuild } from '../../state/build';
 import StepHome from './StepHome';
+import { latLngToImagePx } from '../../lib/mercator';
 
 // jsdom does not implement matchMedia; motion/react's useReducedMotion()
 // (used by RevealGroup/RevealItem) reads it on every render. Stub it to
@@ -310,6 +311,179 @@ describe('StepHome satellite measurement: adjustable roof outline editor (feedba
     const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
     expect(input.value).toBe('');
     expect(document.body.textContent).not.toMatch(/2417/);
+  });
+});
+
+// sw -> nw -> ne -> se, matching the store's outlineCorners ordering, for
+// MAP_META's bounding box.
+const BBOX_CORNERS = [
+  { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng },
+  { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng },
+  { lat: MAP_META.ne.lat, lng: MAP_META.ne.lng },
+  { lat: MAP_META.sw.lat, lng: MAP_META.ne.lng },
+];
+
+function bboxPointsAttr(): string {
+  return BBOX_CORNERS.map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META))
+    .map((p) => `${p.x},${p.y}`)
+    .join(' ');
+}
+
+describe('StepHome satellite measurement: confirm card renders the outline overlay (feedback round 6)', () => {
+  beforeEach(() => {
+    // Same 1:1 mock RoofOutlineEditor.test.tsx uses: the drag math (and the
+    // shared overlay's registration) reads the container's on-screen box
+    // via getBoundingClientRect() and maps it into mapMeta's image-pixel
+    // space. Mock it 1:1 with the image's native pixel size so clientX/Y
+    // given in these tests can be read directly as image-px.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      width: MAP_META.imgW,
+      height: MAP_META.imgH,
+      right: MAP_META.imgW,
+      bottom: MAP_META.imgH,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    });
+  });
+
+  function firePointer(
+    element: Element,
+    type: 'pointerdown' | 'pointermove' | 'pointerup',
+    props: { clientX: number; clientY: number; pointerId: number }
+  ) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, props);
+    fireEvent(element, event);
+  }
+
+  it('golden: the confirm card renders a polygon matching the bbox corners for a fresh (unadjusted) measurement', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2308.32, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    await screen.findByAltText('Aerial view with your roof outlined');
+
+    const polygon = await waitFor(() => {
+      const el = document.querySelector('svg polygon');
+      expect(el).toBeTruthy();
+      return el as SVGPolygonElement;
+    });
+    expect(polygon.getAttribute('points')).toBe(bboxPointsAttr());
+  });
+
+  it('after an adjustment, the confirm card polygon CHANGES to match the adjusted corners, not the original bbox', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2308.32, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust outline' }));
+    expect(screen.getByText('Adjust the roof outline')).toBeTruthy();
+
+    const startPx = latLngToImagePx(BBOX_CORNERS[0]!.lat, BBOX_CORNERS[0]!.lng, MAP_META);
+    const movedPx = { x: startPx.x - 60, y: startPx.y + 40 };
+    const handle0 = screen.getByTestId('roof-outline-corner-0');
+    firePointer(handle0, 'pointerdown', { pointerId: 1, clientX: startPx.x, clientY: startPx.y });
+    firePointer(handle0, 'pointermove', { pointerId: 1, clientX: movedPx.x, clientY: movedPx.y });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+
+    await screen.findByText('We found your roof.');
+    const adjustedCorners = useBuild.getState().outlineCorners;
+    expect(adjustedCorners).not.toBeNull();
+
+    const expectedPoints = adjustedCorners!
+      .map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META))
+      .map((p) => `${p.x},${p.y}`)
+      .join(' ');
+
+    const polygon = await waitFor(() => {
+      const el = document.querySelector('svg polygon');
+      expect(el).toBeTruthy();
+      return el as SVGPolygonElement;
+    });
+    expect(polygon.getAttribute('points')).toBe(expectedPoints);
+    expect(polygon.getAttribute('points')).not.toBe(bboxPointsAttr());
+  });
+
+  it('reopening the editor after an adjustment starts from the adjusted corners, not the original bbox', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2308.32, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust outline' }));
+    const startPx = latLngToImagePx(BBOX_CORNERS[0]!.lat, BBOX_CORNERS[0]!.lng, MAP_META);
+    const movedPx = { x: startPx.x - 60, y: startPx.y + 40 };
+    const handle0 = screen.getByTestId('roof-outline-corner-0');
+    firePointer(handle0, 'pointerdown', { pointerId: 1, clientX: startPx.x, clientY: startPx.y });
+    firePointer(handle0, 'pointermove', { pointerId: 1, clientX: movedPx.x, clientY: movedPx.y });
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+    await screen.findByText('We found your roof.');
+    const adjustedCorners = useBuild.getState().outlineCorners!;
+
+    // Reopen the editor: its own initial polygon (before any further drag)
+    // must match the ADJUSTED corners the store now holds, not the
+    // original bbox -- this is exactly what "editor initial corners come
+    // from the store" means.
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust outline' }));
+    expect(screen.getByText('Adjust the roof outline')).toBeTruthy();
+
+    const editorPolygon = document.querySelector('svg polygon') as SVGPolygonElement;
+    const expectedInitialPoints = adjustedCorners
+      .map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META))
+      .map((p) => `${p.x},${p.y}`)
+      .join(' ');
+    expect(editorPolygon.getAttribute('points')).toBe(expectedInitialPoints);
+    expect(editorPolygon.getAttribute('points')).not.toBe(bboxPointsAttr());
+
+    // Cancel and confirm the store itself still holds the adjusted corners
+    // (not reset back to the bbox by having reopened the editor).
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await screen.findByText('We found your roof.');
+    expect(useBuild.getState().outlineCorners).toEqual(adjustedCorners);
+  });
+
+  it('missing mapMeta (no bounding box) renders the plain aerial photo with NO svg/polygon overlay', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 1850.5, imageUrl: 'https://x/a.png' }),
+        })
+      )
+    );
+    setup();
+
+    const img = await screen.findByAltText('Aerial view with your roof outlined');
+    expect(img).toBeTruthy();
+    expect(document.querySelector('svg polygon')).toBeNull();
+    expect(useBuild.getState().mapMeta).toBeNull();
+    expect(useBuild.getState().outlineCorners).toBeNull();
   });
 });
 

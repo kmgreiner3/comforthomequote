@@ -1,25 +1,19 @@
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { PrimaryButton, SecondaryLinkButton } from './ui';
-import type { MapMeta } from '../../lib/mapMeta';
-import { areaM2ToSqft, imagePxToMetersFromCenter, latLngToImagePx, shoelaceAreaM2 } from '../../lib/mercator';
+import RoofOutlineOverlay from './RoofOutlineOverlay';
+import type { LatLngCorner, MapMeta } from '../../lib/mapMeta';
+import {
+  areaM2ToSqft,
+  imagePxToLatLng,
+  imagePxToMetersFromCenter,
+  latLngToImagePx,
+  shoelaceAreaM2,
+} from '../../lib/mercator';
 import { formatFootprintSqft } from '../../lib/format';
 
 interface Corner {
   x: number;
   y: number;
-}
-
-// Rectangle corners in the same drawing order app/api's boundingBoxPathPoints
-// uses (sw -> nw -> ne -> se), projected to image px via the same Web
-// Mercator math the static map image itself was rendered with.
-function initialCorners(mapMeta: MapMeta): Corner[] {
-  const { sw, ne } = mapMeta;
-  return [
-    { lat: sw.lat, lng: sw.lng },
-    { lat: ne.lat, lng: sw.lng },
-    { lat: ne.lat, lng: ne.lng },
-    { lat: sw.lat, lng: ne.lng },
-  ].map(({ lat, lng }) => latLngToImagePx(lat, lng, mapMeta));
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -46,15 +40,26 @@ function computeSqft(corners: Corner[], mapMeta: MapMeta): number {
 export default function RoofOutlineEditor({
   imageUrl,
   mapMeta,
+  corners: initialCorners,
   onApply,
   onCancel,
 }: {
   imageUrl: string;
   mapMeta: MapMeta;
-  onApply: (sqft: number) => void;
+  // Starting corners for this editing session -- from the store's
+  // outlineCorners (feedback round 6), so reopening the editor after a
+  // prior adjustment starts from the adjusted shape, not the original
+  // satellite bounding box. Same sw -> nw -> ne -> se order as the store.
+  corners: LatLngCorner[];
+  onApply: (sqft: number, corners: LatLngCorner[]) => void;
   onCancel: () => void;
 }) {
-  const [corners, setCorners] = useState<Corner[]>(() => initialCorners(mapMeta));
+  // Drag state lives in image-pixel space (what pointer events naturally
+  // give us); lat/lng is only ever derived from it, on demand, never the
+  // other way during a drag.
+  const [corners, setCorners] = useState<Corner[]>(() =>
+    initialCorners.map(({ lat, lng }) => latLngToImagePx(lat, lng, mapMeta))
+  );
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -62,6 +67,12 @@ export default function RoofOutlineEditor({
   // to run on every drag frame, giving the "about N sq ft" readout below a
   // live update while dragging.
   const liveSqft = useMemo(() => computeSqft(corners, mapMeta), [corners, mapMeta]);
+
+  // For the shared overlay's polygon (and for "Use this outline"'s
+  // onApply): projected back to lat/lng from the current pixel state. A
+  // harmless floating-point-only round trip for rendering -- the pixel
+  // state above remains the actual source of truth while dragging.
+  const latLngCorners = useMemo(() => corners.map((c) => imagePxToLatLng(c, mapMeta)), [corners, mapMeta]);
 
   function moveCorner(index: number, clientX: number, clientY: number) {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -91,30 +102,19 @@ export default function RoofOutlineEditor({
     setDraggingIndex(null);
   }
 
-  const points = corners.map((c) => `${c.x},${c.y}`).join(' ');
-
   return (
     <div className="max-w-sm">
-      <div
+      <RoofOutlineOverlay
         ref={containerRef}
-        data-testid="roof-outline-editor-surface"
+        containerTestId="roof-outline-editor-surface"
+        imageUrl={imageUrl}
+        alt="Aerial view of your property. Drag the corners to match your roof."
+        mapMeta={mapMeta}
+        corners={latLngCorners}
+        objectFit="none"
         className="relative w-full touch-none select-none overflow-hidden rounded-2xl"
-        style={{ touchAction: 'none' }}
+        imgClassName="block w-full"
       >
-        <img
-          src={imageUrl}
-          alt="Aerial view of your property. Drag the corners to match your roof."
-          className="block w-full"
-          draggable={false}
-        />
-        <svg
-          viewBox={`0 0 ${mapMeta.imgW} ${mapMeta.imgH}`}
-          preserveAspectRatio="none"
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 h-full w-full"
-        >
-          <polygon points={points} className="fill-blue-600/20 stroke-blue-600" strokeWidth={6} />
-        </svg>
         {corners.map((c, i) => (
           <div
             key={i}
@@ -132,7 +132,7 @@ export default function RoofOutlineEditor({
             }}
           />
         ))}
-      </div>
+      </RoofOutlineOverlay>
 
       <p className="mt-3 text-sm font-medium text-navy-950" aria-live="polite" data-testid="roof-outline-live-sqft">
         About {formatFootprintSqft(liveSqft)} sq ft
@@ -144,7 +144,11 @@ export default function RoofOutlineEditor({
       )}
 
       <div className="mt-4 flex flex-wrap gap-3">
-        <PrimaryButton type="button" disabled={!isValidSqft(liveSqft)} onClick={() => onApply(liveSqft)}>
+        <PrimaryButton
+          type="button"
+          disabled={!isValidSqft(liveSqft)}
+          onClick={() => onApply(liveSqft, latLngCorners)}
+        >
           Use this outline
         </PrimaryButton>
         <SecondaryLinkButton type="button" onClick={onCancel}>

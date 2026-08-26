@@ -13,6 +13,19 @@ import {
 import { clearStepFlags } from '../routes/build/useStepFlags';
 import { clearMeasurementAttempt } from '../routes/build/measurementAttempt';
 import { clearNextStepFlags } from '../routes/next/useStepFlags';
+import type { LatLngCorner, MapMeta } from '../lib/mapMeta';
+
+// Rectangle corners in the same drawing order app/api's boundingBoxPathPoints
+// used to use (sw -> nw -> ne -> se), derived from a mapMeta's bounding box
+// -- the initial, unadjusted quad before any homeowner drag.
+function cornersFromMapMeta(m: MapMeta): LatLngCorner[] {
+  return [
+    { lat: m.sw.lat, lng: m.sw.lng },
+    { lat: m.ne.lat, lng: m.sw.lng },
+    { lat: m.ne.lat, lng: m.ne.lng },
+    { lat: m.sw.lat, lng: m.ne.lng },
+  ];
+}
 
 export type DripEdge = 'White' | 'Black' | 'Brown';
 
@@ -51,6 +64,18 @@ export interface BuildState {
   // expired URL just fails to load; the <img>'s onError handler hides it
   // rather than the store having to know anything about expiry.
   propertyImageUrl: string | null;
+  // The mapMeta the last successful /api/measure with a bounding box
+  // returned (Task A), and the 4 roof-outline corners (sw, nw, ne, se) it
+  // and any subsequent homeowner adjustment resolve to. Together these are
+  // the single source of truth the confirm card's read-only overlay and the
+  // adjust-outline editor's draggable one both render from (feedback round
+  // 6) -- so the two can never show a different rectangle, and reopening
+  // the editor after an adjustment starts from the adjusted shape, not the
+  // original satellite bounding box. Persisted (like propertyImageUrl) so a
+  // revisit -- even one that re-fetches after the session cache is gone --
+  // still renders the adjusted shape rather than resetting to the bbox.
+  mapMeta: MapMeta | null;
+  outlineCorners: LatLngCorner[] | null;
   shingle: ShingleKey | null;
   color: string | null;
   underlayment: Underlayment; // default 'synthetic'
@@ -83,7 +108,16 @@ export interface BuildState {
   // navigation's satellite-number leak guard also applies to this value
   // (it's still an image-derived measurement, just user-refined -- not a
   // hand-typed footprint).
-  setOutlineAdjusted(sqft: number): void;
+  setOutlineAdjusted(sqft: number, corners: LatLngCorner[]): void;
+  // Called once per successful measurement (see StepHome) with the mapMeta
+  // the response returned, or null when there's no bounding box to draw.
+  // Initializes outlineCorners from the box's sw/ne corners ONLY when
+  // there isn't already a value for this address (a prior adjustment, or
+  // an earlier initialization this same visit) -- so re-syncing on every
+  // render, or re-fetching after the session-scoped measurement-attempt
+  // cache is gone, never clobbers a homeowner's adjustment back to the
+  // original bbox. A null mapMeta clears both fields together.
+  setMeasuredMapMeta(mapMeta: MapMeta | null): void;
   setPropertyImageUrl(url: string | null): void;
   setShingle(k: ShingleKey): void;
   setColor(c: string): void;
@@ -111,6 +145,8 @@ type PersistedFields = Pick<
   | 'sq'
   | 'outlineSource'
   | 'propertyImageUrl'
+  | 'mapMeta'
+  | 'outlineCorners'
   | 'shingle'
   | 'color'
   | 'underlayment'
@@ -127,6 +163,8 @@ const initialState: PersistedFields = {
   sq: null,
   outlineSource: null,
   propertyImageUrl: null,
+  mapMeta: null,
+  outlineCorners: null,
   shingle: null,
   color: null,
   underlayment: 'synthetic',
@@ -165,6 +203,8 @@ export const useBuild = create<BuildState>()(
           sq: null,
           outlineSource: null,
           propertyImageUrl: null,
+          mapMeta: null,
+          outlineCorners: null,
         });
       },
       // Manual entry (StepHome's own footprint field). Always wins over a
@@ -177,10 +217,19 @@ export const useBuild = create<BuildState>()(
       setOutlineFromSatellite: (sqft) =>
         set({ outlineSqft: sqft, sq: sqFromOutline(sqft), outlineSource: 'satellite' }),
       // Homeowner dragged the roof-outline editor's corners to a better fit
-      // and confirmed it via "Use this outline". Same derivation, distinct
-      // provenance tag.
-      setOutlineAdjusted: (sqft) =>
-        set({ outlineSqft: sqft, sq: sqFromOutline(sqft), outlineSource: 'adjusted' }),
+      // and confirmed it via "Use this outline". Same sqft/sq derivation,
+      // distinct provenance tag -- plus the adjusted corners themselves,
+      // so the confirm card renders the SAME quad the homeowner just set,
+      // not the original satellite bounding box.
+      setOutlineAdjusted: (sqft, corners) =>
+        set({ outlineSqft: sqft, sq: sqFromOutline(sqft), outlineSource: 'adjusted', outlineCorners: corners }),
+      setMeasuredMapMeta: (mapMeta) => {
+        if (!mapMeta) {
+          set({ mapMeta: null, outlineCorners: null });
+          return;
+        }
+        set({ mapMeta, outlineCorners: get().outlineCorners ?? cornersFromMapMeta(mapMeta) });
+      },
       setPropertyImageUrl: (url) => set({ propertyImageUrl: url }),
       // Changing shingle resets color: the two products have different color
       // lists. Re-selecting the *same* shingle is a no-op -- it must not

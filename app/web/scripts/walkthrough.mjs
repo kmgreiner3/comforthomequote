@@ -488,6 +488,99 @@ async function checkSatelliteConfirmAmberNotice(browser, width, height) {
   await context.close();
 }
 
+const HOME_MAP_META = {
+  centerLat: 27.336230049999998,
+  centerLng: -82.539976,
+  zoom: 20,
+  sw: { lat: 27.3360897, lng: -82.5400199 },
+  ne: { lat: 27.3363704, lng: -82.5399321 },
+  imgW: 1280,
+  imgH: 800,
+};
+
+// Feedback round 6: the reported bug was that adjusting the outline updated
+// the footprint number but the confirm card kept showing the ORIGINAL
+// rectangle. Drives a REAL pointer drag on one of the adjust-outline
+// editor's corner handles via Playwright's mouse API (a real browser has a
+// real PointerEvent, unlike jsdom, which has none at all -- that's why this
+// lives here rather than only in a component test), applies it, and
+// screenshots the confirm card showing the quad has actually changed.
+async function checkAdjustedOutlineOverlay(browser, width, height) {
+  const context = await browser.newContext({ viewport: { width, height } });
+  const page = await context.newPage();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+
+  const mockImageUrl = `${BASE_URL}/mock-aerial-2.png`;
+  await page.route('**/mock-aerial-2.png', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(BLANK_PNG_BASE64, 'base64') })
+  );
+  await page.route('**/api/measure', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        found: true,
+        outlineSqft: 2308.32,
+        imageUrl: mockImageUrl,
+        mapMeta: HOME_MAP_META,
+      }),
+    })
+  );
+
+  await page.goto(`${BASE_URL}/build`);
+  await waitForStep(page, 'address');
+  await page.getByLabel('Property address').fill('1530 Main St, Sarasota, FL 34236');
+  await page.getByRole('button', { name: 'Build My Roof' }).click();
+
+  await waitForStep(page, 'home');
+  await page.getByText('We found your roof.').waitFor({ timeout: 5000 });
+  const originalPolygonPoints = await page.locator('svg polygon').getAttribute('points');
+
+  await page.getByRole('button', { name: 'Adjust outline' }).click();
+  await page.getByText('Adjust the roof outline').waitFor({ timeout: 2000 });
+
+  const handle = page.getByTestId('roof-outline-corner-0');
+  const box = await handle.boundingBox();
+  if (!box) fail(`[adjusted overlay @ ${width}x${height}] could not locate corner handle 0's bounding box`);
+
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  // A modest inward drag -- big enough to visibly change the quad and the
+  // sq ft readout, comfortably clear of the out-of-range guard that
+  // disables "Use this outline" (RoofOutlineEditor.test.tsx's own fixtures
+  // need a full-image drag on all 4 corners to trip that; this is one
+  // corner, moved a small fraction of the frame).
+  const endX = startX + 40;
+  const endY = startY + 30;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(endX, endY, { steps: 10 });
+  await page.mouse.up();
+
+  const applyButton = page.getByRole('button', { name: 'Use this outline' });
+  if (await applyButton.isDisabled()) {
+    fail(`[adjusted overlay @ ${width}x${height}] "Use this outline" unexpectedly disabled after a modest one-corner drag`);
+  }
+  await applyButton.click();
+
+  await page.getByText('We found your roof.').waitFor({ timeout: 5000 });
+  const polygon = page.locator('svg polygon');
+  await polygon.waitFor({ timeout: 2000 });
+  const adjustedPolygonPoints = await polygon.getAttribute('points');
+  if (adjustedPolygonPoints === originalPolygonPoints) {
+    fail(`[adjusted overlay @ ${width}x${height}] confirm card polygon did not change after the drag+apply -- this is exactly the reported bug`);
+  }
+  console.log(
+    `  [adjusted overlay @ ${width}x${height}] confirm card polygon changed after drag+apply (${originalPolygonPoints} -> ${adjustedPolygonPoints})`
+  );
+
+  await polygon.scrollIntoViewIfNeeded();
+  await screenshotNamed(page, 'home-confirm-adjusted', width);
+
+  await context.close();
+}
+
 async function main() {
   fs.mkdirSync(SCREENS_DIR, { recursive: true });
 
@@ -751,6 +844,12 @@ async function main() {
     console.log('\nSatellite confirm card: amber notice + Adjust outline (mocked /api/measure)...');
     await checkSatelliteConfirmAmberNotice(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
     await checkSatelliteConfirmAmberNotice(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
+
+    // --- Feedback round 6: drive a real drag on the adjust-outline editor
+    //     and prove the confirm card's overlay actually changes. ---
+    console.log('\nAdjusted roof outline: real pointer drag, confirm card overlay changes...');
+    await checkAdjustedOutlineOverlay(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
+    await checkAdjustedOutlineOverlay(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
     await browser.close();
     console.log('\nAll assertions passed. Walkthrough complete.');

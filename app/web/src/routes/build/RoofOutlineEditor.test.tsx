@@ -69,7 +69,8 @@ const LARGE_AREA_MAP_META: MapMeta = {
   imgH: 800,
 };
 
-// Corner order matches RoofOutlineEditor's own initialCorners(): sw, nw, ne, se.
+// Corner order matches the store's outlineCorners / RoofOutlineEditor's
+// `corners` prop: sw, nw, ne, se.
 const INITIAL_LATLNG_CORNERS = [
   { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng },
   { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng },
@@ -78,12 +79,15 @@ const INITIAL_LATLNG_CORNERS = [
 ];
 const INITIAL_PX = INITIAL_LATLNG_CORNERS.map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META));
 
-const LARGE_AREA_INITIAL_PX = [
+const LARGE_AREA_LATLNG_CORNERS = [
   { lat: LARGE_AREA_MAP_META.sw.lat, lng: LARGE_AREA_MAP_META.sw.lng },
   { lat: LARGE_AREA_MAP_META.ne.lat, lng: LARGE_AREA_MAP_META.sw.lng },
   { lat: LARGE_AREA_MAP_META.ne.lat, lng: LARGE_AREA_MAP_META.ne.lng },
   { lat: LARGE_AREA_MAP_META.sw.lat, lng: LARGE_AREA_MAP_META.ne.lng },
-].map(({ lat, lng }) => latLngToImagePx(lat, lng, LARGE_AREA_MAP_META));
+];
+const LARGE_AREA_INITIAL_PX = LARGE_AREA_LATLNG_CORNERS.map(({ lat, lng }) =>
+  latLngToImagePx(lat, lng, LARGE_AREA_MAP_META)
+);
 
 function sqftFor(pxCorners: Array<{ x: number; y: number }>): number {
   const meters = pxCorners.map((p) => imagePxToMetersFromCenter(p, MAP_META));
@@ -114,8 +118,16 @@ afterEach(() => {
 });
 
 describe('RoofOutlineEditor', () => {
-  it('shows an initial "about N sq ft" readout derived from the bbox corners', () => {
-    render(<RoofOutlineEditor imageUrl="aerial.png" mapMeta={MAP_META} onApply={vi.fn()} onCancel={vi.fn()} />);
+  it('shows an initial "about N sq ft" readout derived from the given corners', () => {
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
 
     const expectedInitialSqft = sqftFor(INITIAL_PX);
     expect(screen.getByTestId('roof-outline-live-sqft').textContent).toBe(
@@ -125,8 +137,57 @@ describe('RoofOutlineEditor', () => {
     expect(expectedInitialSqft).toBeCloseTo(3229.17, -1);
   });
 
+  it('starts from an already-adjusted set of corners, not the bbox, when given one (reopening after a prior adjustment)', () => {
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    const bboxSqft = sqftFor(INITIAL_PX);
+
+    cleanup();
+
+    // A genuinely different (previously-adjusted) set of corners, further
+    // out than the bbox -- this must change the INITIAL readout, proving
+    // the editor seeded its state from `corners`, not from mapMeta.sw/ne.
+    const grown = [
+      { lat: MAP_META.sw.lat - 0.00002, lng: MAP_META.sw.lng - 0.00002 },
+      { lat: MAP_META.ne.lat + 0.00002, lng: MAP_META.sw.lng - 0.00002 },
+      { lat: MAP_META.ne.lat + 0.00002, lng: MAP_META.ne.lng + 0.00002 },
+      { lat: MAP_META.sw.lat - 0.00002, lng: MAP_META.ne.lng + 0.00002 },
+    ];
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={grown}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+
+    const grownPx = grown.map(({ lat, lng }) => latLngToImagePx(lat, lng, MAP_META));
+    const expectedGrownSqft = sqftFor(grownPx);
+    expect(screen.getByTestId('roof-outline-live-sqft').textContent).toBe(
+      `About ${formatFootprintSqft(expectedGrownSqft)} sq ft`
+    );
+    expect(expectedGrownSqft).toBeGreaterThan(bboxSqft);
+  });
+
   it('dragging a corner (pointerdown -> pointermove) live-updates the sq ft readout to match the new geometry', () => {
-    render(<RoofOutlineEditor imageUrl="aerial.png" mapMeta={MAP_META} onApply={vi.fn()} onCancel={vi.fn()} />);
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
 
     const handle0 = screen.getByTestId('roof-outline-corner-0');
     const start = INITIAL_PX[0]!;
@@ -148,7 +209,15 @@ describe('RoofOutlineEditor', () => {
   });
 
   it('ignores a pointermove for a corner that was never pressed down (no drag in progress)', () => {
-    render(<RoofOutlineEditor imageUrl="aerial.png" mapMeta={MAP_META} onApply={vi.fn()} onCancel={vi.fn()} />);
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
     const initialText = screen.getByTestId('roof-outline-live-sqft').textContent;
 
     firePointer(screen.getByTestId('roof-outline-corner-0'), 'pointermove', {
@@ -161,7 +230,15 @@ describe('RoofOutlineEditor', () => {
   });
 
   it('clamps a corner drag to stay within the image bounds', () => {
-    render(<RoofOutlineEditor imageUrl="aerial.png" mapMeta={MAP_META} onApply={vi.fn()} onCancel={vi.fn()} />);
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
     const handle0 = screen.getByTestId('roof-outline-corner-0');
 
     firePointer(handle0, 'pointerdown', { pointerId: 1, clientX: -5000, clientY: -5000 });
@@ -172,9 +249,17 @@ describe('RoofOutlineEditor', () => {
     );
   });
 
-  it('"Use this outline" calls onApply with the current live sq ft', () => {
+  it('"Use this outline" calls onApply with the current live sq ft and the current corners as lat/lng', () => {
     const onApply = vi.fn();
-    render(<RoofOutlineEditor imageUrl="aerial.png" mapMeta={MAP_META} onApply={onApply} onCancel={vi.fn()} />);
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={onApply}
+        onCancel={vi.fn()}
+      />
+    );
 
     const handle0 = screen.getByTestId('roof-outline-corner-0');
     const start = INITIAL_PX[0]!;
@@ -186,13 +271,31 @@ describe('RoofOutlineEditor', () => {
 
     const expectedSqft = sqftFor([moved, INITIAL_PX[1]!, INITIAL_PX[2]!, INITIAL_PX[3]!]);
     expect(onApply).toHaveBeenCalledTimes(1);
-    expect(onApply.mock.calls[0]![0]).toBeCloseTo(expectedSqft, 2);
+    const [sqftArg, cornersArg] = onApply.mock.calls[0]!;
+    expect(sqftArg).toBeCloseTo(expectedSqft, 2);
+    // The applied corners round-trip back (via the same mercator math) to
+    // the dragged pixel positions -- proving onApply's second argument is
+    // the ACTUAL adjusted quad, not the original bbox.
+    expect(cornersArg).toHaveLength(4);
+    const roundTripped = (cornersArg as Array<{ lat: number; lng: number }>).map(({ lat, lng }) =>
+      latLngToImagePx(lat, lng, MAP_META)
+    );
+    expect(roundTripped[0]!.x).toBeCloseTo(moved.x, 3);
+    expect(roundTripped[0]!.y).toBeCloseTo(moved.y, 3);
   });
 
   it('"Cancel" calls onCancel and never onApply, regardless of any dragging done first', () => {
     const onApply = vi.fn();
     const onCancel = vi.fn();
-    render(<RoofOutlineEditor imageUrl="aerial.png" mapMeta={MAP_META} onApply={onApply} onCancel={onCancel} />);
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={onApply}
+        onCancel={onCancel}
+      />
+    );
 
     const handle0 = screen.getByTestId('roof-outline-corner-0');
     firePointer(handle0, 'pointerdown', { pointerId: 1, clientX: 200, clientY: 200 });
@@ -205,7 +308,15 @@ describe('RoofOutlineEditor', () => {
   });
 
   it('renders exactly 4 draggable corner handles', () => {
-    render(<RoofOutlineEditor imageUrl="aerial.png" mapMeta={MAP_META} onApply={vi.fn()} onCancel={vi.fn()} />);
+    render(
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={MAP_META}
+        corners={INITIAL_LATLNG_CORNERS}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
     for (let i = 0; i < 4; i++) {
       expect(screen.getByTestId(`roof-outline-corner-${i}`)).toBeTruthy();
     }
@@ -214,7 +325,13 @@ describe('RoofOutlineEditor', () => {
   it('disables "Use this outline" and shows a warning when a drag produces an unrealistic (out of pricing-engine range) footprint', () => {
     const onApply = vi.fn();
     render(
-      <RoofOutlineEditor imageUrl="aerial.png" mapMeta={LARGE_AREA_MAP_META} onApply={onApply} onCancel={vi.fn()} />
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={LARGE_AREA_MAP_META}
+        corners={LARGE_AREA_LATLNG_CORNERS}
+        onApply={onApply}
+        onCancel={vi.fn()}
+      />
     );
 
     // Drag all 4 corners out to their own quadrant's image corner (sw->
@@ -259,7 +376,13 @@ describe('RoofOutlineEditor', () => {
   it('re-enables "Use this outline" once corners are dragged back to a realistic footprint', () => {
     const onApply = vi.fn();
     render(
-      <RoofOutlineEditor imageUrl="aerial.png" mapMeta={LARGE_AREA_MAP_META} onApply={onApply} onCancel={vi.fn()} />
+      <RoofOutlineEditor
+        imageUrl="aerial.png"
+        mapMeta={LARGE_AREA_MAP_META}
+        corners={LARGE_AREA_LATLNG_CORNERS}
+        onApply={onApply}
+        onCancel={vi.fn()}
+      />
     );
 
     const { imgW, imgH } = LARGE_AREA_MAP_META;

@@ -75,6 +75,35 @@ export function imagePxToMetersFromCenter(px: ImagePoint, meta: MapMeta): { dxMe
   };
 }
 
+// Inverse of worldPixelX: the plain (scale-1) world-pixel X -> longitude.
+function lngFromWorldPixelX(worldX: number, zoom: number): number {
+  return (worldX / (TILE_SIZE_PX * 2 ** zoom)) * 360 - 180;
+}
+
+// Inverse of worldPixelY (standard Web Mercator inverse): the plain
+// (scale-1) world-pixel Y -> latitude, via lat = atan(sinh(pi*(1-2*yNorm))).
+function latFromWorldPixelY(worldY: number, zoom: number): number {
+  const yNorm = worldY / (TILE_SIZE_PX * 2 ** zoom);
+  const n = Math.PI * (1 - 2 * yNorm);
+  return (Math.atan(Math.sinh(n)) * 180) / Math.PI;
+}
+
+// Exact inverse of latLngToImagePx: an image pixel position on the rendered
+// scale-2 static map image described by `meta` -> the lat/lng it
+// represents. Needed so a dragged corner (naturally tracked in image-pixel
+// space while the pointer moves) can be persisted as the lat/lng the store
+// keeps as its outline-corners source of truth (feedback round 6).
+export function imagePxToLatLng(px: ImagePoint, meta: MapMeta): { lat: number; lng: number } {
+  const centerWorldX = worldPixelX(meta.centerLng, meta.zoom);
+  const centerWorldY = worldPixelY(meta.centerLat, meta.zoom);
+  const dxWorld = (px.x - meta.imgW / 2) / STATIC_MAP_SCALE;
+  const dyWorld = (px.y - meta.imgH / 2) / STATIC_MAP_SCALE;
+  return {
+    lat: latFromWorldPixelY(centerWorldY + dyWorld, meta.zoom),
+    lng: lngFromWorldPixelX(centerWorldX + dxWorld, meta.zoom),
+  };
+}
+
 // Shoelace formula for the (unsigned) area of a simple polygon given as
 // meter offsets from a common origin. Works for any winding order (abs()'d
 // at the end) and any polygon length >= 3.
