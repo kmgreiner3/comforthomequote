@@ -24,7 +24,7 @@ const s3Mock = mockClient(S3Client);
 
 function expectedMapKey(address: string): string {
   const normalized = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  return `maps/v3/${createHash('sha256').update(normalized).digest('hex')}.png`;
+  return `maps/v4/${createHash('sha256').update(normalized).digest('hex')}.png`;
 }
 
 function pngResponse() {
@@ -277,7 +277,7 @@ describe('measure handler property image', () => {
     expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
   });
 
-  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/v3/<sha256>.png', async () => {
+  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/v4/<sha256>.png', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
     s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
     const fetchMock = vi
@@ -311,7 +311,7 @@ describe('measure handler property image', () => {
     expect(putCalls[0]?.args[0].input.ContentType).toBe('image/png');
   });
 
-  it('draws the measured bounding box as a Static Maps path overlay, centered on the box at a computed tight-fit zoom', async () => {
+  it('golden: the stored aerial has NO path overlay baked in (feedback round 6), but keeps the same center/zoom framing as before', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
     s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
     const fetchMock = vi
@@ -343,20 +343,15 @@ describe('measure handler property image', () => {
     expect(parsed.imageUrl).toBeTruthy();
 
     const mapUrl = new URL(fetchMock.mock.calls[2]![0] as string);
-    expect(mapUrl.searchParams.has('path')).toBe(true);
-    const path = decodeURIComponent(mapUrl.searchParams.get('path')!);
-    expect(path.split('|').slice(-5)).toEqual([
-      '27.949,-82.461',
-      '27.951,-82.461',
-      '27.951,-82.459',
-      '27.949,-82.459',
-      '27.949,-82.461',
-    ]);
-    // Auto-fit (no center/zoom) used to frame the whole city grid around
-    // the building instead of the building itself -- now centered on the
-    // bbox centroid at a computed tight-fit zoom (BBOX_FIXTURE's ~222.6m
-    // larger span clamps to zoom 18; see google.test.ts's
-    // computeOverlayZoom tests for the arithmetic).
+    // The root-cause fix: no path= overlay drawn into the fetched pixels at
+    // all, regardless of the bounding box -- the outline is now drawn
+    // client-side from mapMeta instead, so an adjustment can actually
+    // change what's rendered.
+    expect(mapUrl.searchParams.has('path')).toBe(false);
+    // Framing itself is unchanged: still centered on the bbox centroid at
+    // a computed tight-fit zoom (BBOX_FIXTURE's ~222.6m larger span clamps
+    // to zoom 18; see google.test.ts's computeOverlayZoom tests for the
+    // arithmetic).
     expect(mapUrl.searchParams.get('center')).toBe('27.950000000000003,-82.46000000000001');
     expect(mapUrl.searchParams.get('zoom')).toBe('18');
     const putCalls = s3Mock.commandCalls(PutObjectCommand);

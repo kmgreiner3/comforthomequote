@@ -46,24 +46,27 @@ function imageCacheIdentity(address: string | undefined, placeId: string | undef
   return placeId ? `placeid:${placeId}` : normalizeAddress(address!);
 }
 
-// v3: filenames now bake in the computed-zoom tight framing (see
-// staticMapUrl/computeOverlayZoom in google.ts) -- v2's auto-fit framed the
-// whole city grid around a small building instead of the roof itself.
-// Bumping the prefix means previously cached images (v1 overlay-less, v2
-// auto-fit) regenerate instead of being served stale; the old maps/*
-// objects age out on their own via the existing lifecycle rule (its
-// "maps/" prefix still covers "maps/v3/*"), and the measure Lambda's IAM
-// policy already scopes to "maps/*", which also still covers "maps/v3/*".
+// v4: drops the path= polygon overlay entirely (feedback round 6) -- the
+// roof outline is now always drawn client-side as an SVG overlay from
+// mapMeta's corners, because a server-baked pixel outline can never reflect
+// a client-side adjustment (the reported bug). v3's cached images have the
+// old outline baked in and must not be served for a v4 request; bumping the
+// prefix forces a regenerate. (v3: computed-zoom tight framing; v2's
+// auto-fit framed the whole city grid around a small building instead of
+// the roof itself.) The old maps/* objects age out on their own via the
+// existing lifecycle rule (its "maps/" prefix still covers "maps/v4/*"),
+// and the measure Lambda's IAM policy already scopes to "maps/*", which
+// also still covers "maps/v4/*".
 function mapCacheKey(identity: string): string {
   const hash = createHash('sha256').update(identity).digest('hex');
-  return `maps/v3/${hash}.png`;
+  return `maps/v4/${hash}.png`;
 }
 
-// Best-effort property aerial photo: fetches (or reuses a cached) Static
-// Maps PNG -- overlaid with the measured building's bounding box when Solar
-// provided one -- and returns a presigned GET url for it. Never throws --
-// any failure here must not fail the measurement, so the caller simply gets
-// no imageUrl back.
+// Best-effort property aerial photo: fetches (or reuses a cached) a CLEAN
+// Static Maps PNG -- framed on the measured building's bounding box when
+// Solar provided one, but with no outline baked into the pixels -- and
+// returns a presigned GET url for it. Never throws -- any failure here must
+// not fail the measurement, so the caller simply gets no imageUrl back.
 async function getPropertyImageUrl(
   identity: string,
   lat: number,

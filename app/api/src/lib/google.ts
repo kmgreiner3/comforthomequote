@@ -137,23 +137,6 @@ export async function getGroundAreaSqft(lat: number, lng: number, apiKey: string
   };
 }
 
-// Static Maps overlay styling for the measured-building polygon: fubo blue,
-// translucent fill.
-const OVERLAY_PATH_STYLE = 'color:0x2563C9FF|weight:3|fillcolor:0x2563C933';
-
-// Rectangle corners in overlay-drawing order (sw -> nw -> ne -> se -> back
-// to sw, closing the polygon), each as a Static Maps "lat,lng" point.
-function boundingBoxPathPoints(box: BoundingBox): string[] {
-  const { sw, ne } = box;
-  return [
-    `${sw.latitude},${sw.longitude}`,
-    `${ne.latitude},${sw.longitude}`,
-    `${ne.latitude},${ne.longitude}`,
-    `${sw.latitude},${ne.longitude}`,
-    `${sw.latitude},${sw.longitude}`,
-  ];
-}
-
 // Static Maps auto-fit (no explicit center/zoom) framed the whole city grid
 // around a small building, not the building itself -- so instead we always
 // send an explicit center (the bounding box's centroid) and a computed
@@ -219,16 +202,19 @@ function overlayFraming(box: BoundingBox): OverlayFraming {
 }
 
 // Builds the Static Maps request URL. With a bounding box, centers on the
-// box's centroid at a computed tight-fit zoom and draws the measured
-// building as a polygon overlay. Without one, falls back to a plain
-// center/zoom satellite view with no overlay.
+// box's centroid at a computed tight-fit zoom -- the same framing as
+// before -- but draws NO overlay (feedback round 6): a server-drawn path=
+// polygon is a baked pixel artifact that a client-side outline adjustment
+// can never change, which is exactly the bug this fixes. The image is now
+// always a clean aerial photo; the outline is drawn in the browser as an
+// SVG overlay from mapMeta's corners instead. Without a bounding box, falls
+// back to a plain center/zoom satellite view (unchanged).
 function staticMapUrl(lat: number, lng: number, apiKey: string, boundingBox: BoundingBox | null | undefined): string {
   const base = 'https://maps.googleapis.com/maps/api/staticmap';
   const common = `size=${MAP_WIDTH_PX}x${MAP_HEIGHT_PX}&scale=${STATIC_MAP_SCALE}&maptype=satellite`;
   if (boundingBox) {
     const { center, zoom } = overlayFraming(boundingBox);
-    const path = `${OVERLAY_PATH_STYLE}|${boundingBoxPathPoints(boundingBox).join('|')}`;
-    return `${base}?center=${center.latitude},${center.longitude}&zoom=${zoom}&path=${encodeURIComponent(path)}&${common}&key=${apiKey}`;
+    return `${base}?center=${center.latitude},${center.longitude}&zoom=${zoom}&${common}&key=${apiKey}`;
   }
   return `${base}?center=${lat},${lng}&zoom=20&${common}&key=${apiKey}`;
 }
@@ -243,12 +229,14 @@ export interface MapMeta {
   imgH: number;
 }
 
-// mapMeta for the adjustable-outline editor (Task B): the exact center,
-// zoom and image pixel dimensions the static map PNG was rendered with, so
-// the editor can convert the bounding box corners to pixel positions via
-// Web Mercator math that matches the image on screen. Derived from the same
-// overlayFraming() + size constants staticMapUrl() uses above -- never
-// compute these independently.
+// mapMeta for the client-drawn outline overlay (Task B, and its confirm-card
+// read-only counterpart added in feedback round 6): the exact center, zoom
+// and image pixel dimensions the static map PNG was rendered with, so the
+// browser can convert the bounding box corners to pixel positions via Web
+// Mercator math that matches the image on screen -- now the ONLY place the
+// outline gets drawn, since the image itself is a clean aerial with nothing
+// baked in. Derived from the same overlayFraming() + size constants
+// staticMapUrl() uses above -- never compute these independently.
 export function buildMapMeta(box: BoundingBox): MapMeta {
   const { center, zoom } = overlayFraming(box);
   return {
@@ -262,11 +250,13 @@ export function buildMapMeta(box: BoundingBox): MapMeta {
   };
 }
 
-// Fetches a satellite Static Maps PNG for the given point, optionally
-// overlaid with the measured building's bounding box. Best-effort: any
-// non-OK response or network failure returns null rather than throwing, so
-// callers can treat property imagery as optional and never fail measurement
-// on its account.
+// Fetches a clean satellite Static Maps PNG for the given point -- framed
+// tightly on the measured building's bounding box when one is given, but
+// with no overlay drawn into the pixels (feedback round 6: the outline is
+// drawn client-side from mapMeta instead, so it can actually be adjusted).
+// Best-effort: any non-OK response or network failure returns null rather
+// than throwing, so callers can treat property imagery as optional and
+// never fail measurement on its account.
 export async function getStaticMapPng(
   lat: number,
   lng: number,

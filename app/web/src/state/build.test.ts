@@ -276,7 +276,7 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
     expect(getMeasurementAttempt()).not.toBeNull();
   });
 
-  it('setAddress with the SAME address but a NEWLY PICKED (different) placeId records it and clears the measurement attempt, without touching anything else', () => {
+  it('setAddress with the SAME address but a NEWLY PICKED (different) placeId records it and clears the measurement attempt, without touching outlineSqft/propertyImageUrl', () => {
     const s0 = useBuild.getState();
     s0.setAddress('123 Palm Ave, Tampa, FL 33602'); // free-typed, no placeId yet
     s0.setOutline(2000);
@@ -292,10 +292,42 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
     // The measurement-attempt cache is cleared so /api/measure retries via
     // the new exact-match geocode...
     expect(getMeasurementAttempt()).toBeNull();
-    // ...but nothing else about the existing configuration is touched --
-    // it's still the same physical address.
+    // ...but outlineSqft/propertyImageUrl are left alone here -- they get
+    // overwritten in due course when the re-measurement resolves.
     expect(s.outlineSqft).toBe(2000);
     expect(s.propertyImageUrl).toBe('https://example.com/aerial.png');
+  });
+
+  it('setAddress with the SAME address but a NEWLY PICKED placeId clears mapMeta/outlineCorners (feedback round 6: the wrong-building recovery flow)', () => {
+    // Simulates the round-5 recovery flow: a free-typed address measured
+    // the WRONG building (mapMeta/outlineCorners/propertyImageUrl already
+    // synced into the store from that wrong measurement's confirm phase),
+    // then the homeowner picks the exact building from autocomplete for
+    // the SAME address text.
+    const wrongBuildingMapMeta = {
+      centerLat: 27.1,
+      centerLng: -82.1,
+      zoom: 19,
+      sw: { lat: 27.0999, lng: -82.1001 },
+      ne: { lat: 27.1001, lng: -82.0999 },
+      imgW: 1280,
+      imgH: 800,
+    };
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602');
+    s0.setMeasuredMapMeta(wrongBuildingMapMeta);
+    s0.setPropertyImageUrl('https://example.com/wrong-building.png');
+    expect(useBuild.getState().outlineCorners).not.toBeNull();
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/exact-match-123');
+
+    const s = useBuild.getState();
+    expect(s.placeId).toBe('places/exact-match-123');
+    // The old building's bbox/corners must NOT stay stashed -- otherwise
+    // they'd get drawn over the new building's photo once the
+    // re-measurement lands (the actual reported bug).
+    expect(s.mapMeta).toBeNull();
+    expect(s.outlineCorners).toBeNull();
   });
 
   it('setAddress with the SAME address and the SAME placeId (re-passed) is still a full no-op', () => {
@@ -362,8 +394,15 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
 });
 
 describe('useBuild store: setOutlineAdjusted (feedback round 5)', () => {
+  const CORNERS = [
+    { lat: 27.336, lng: -82.54 },
+    { lat: 27.337, lng: -82.54 },
+    { lat: 27.337, lng: -82.539 },
+    { lat: 27.336, lng: -82.539 },
+  ];
+
   it('sets outlineSqft and sq together via the pricing engine, tagged outlineSource=adjusted', () => {
-    useBuild.getState().setOutlineAdjusted(1975);
+    useBuild.getState().setOutlineAdjusted(1975, CORNERS);
     const s = useBuild.getState();
     expect(s.outlineSqft).toBe(1975);
     expect(s.sq).toBe(sqFromOutline(1975));
@@ -374,12 +413,196 @@ describe('useBuild store: setOutlineAdjusted (feedback round 5)', () => {
     useBuild.getState().setOutlineFromSatellite(2000);
     expect(useBuild.getState().outlineSource).toBe('satellite');
 
-    useBuild.getState().setOutlineAdjusted(2150);
+    useBuild.getState().setOutlineAdjusted(2150, CORNERS);
 
     const s = useBuild.getState();
     expect(s.outlineSource).toBe('adjusted');
     expect(s.outlineSqft).toBe(2150);
     expect(s.sq).toBe(sqFromOutline(2150));
+  });
+
+  it('also stores the adjusted corners themselves (feedback round 6)', () => {
+    useBuild.getState().setOutlineAdjusted(1975, CORNERS);
+    expect(useBuild.getState().outlineCorners).toEqual(CORNERS);
+  });
+});
+
+describe('useBuild store: mapMeta / outlineCorners (feedback round 6)', () => {
+  const MAP_META = {
+    centerLat: 27.336230049999998,
+    centerLng: -82.539976,
+    zoom: 20,
+    sw: { lat: 27.3360897, lng: -82.5400199 },
+    ne: { lat: 27.3363704, lng: -82.5399321 },
+    imgW: 1280,
+    imgH: 800,
+  };
+  const BBOX_CORNERS = [
+    { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng },
+    { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng },
+    { lat: MAP_META.ne.lat, lng: MAP_META.ne.lng },
+    { lat: MAP_META.sw.lat, lng: MAP_META.ne.lng },
+  ];
+  const ADJUSTED_CORNERS = [
+    { lat: MAP_META.sw.lat - 0.00001, lng: MAP_META.sw.lng - 0.00001 },
+    { lat: MAP_META.ne.lat + 0.00001, lng: MAP_META.sw.lng - 0.00001 },
+    { lat: MAP_META.ne.lat + 0.00001, lng: MAP_META.ne.lng + 0.00001 },
+    { lat: MAP_META.sw.lat - 0.00001, lng: MAP_META.ne.lng + 0.00001 },
+  ];
+
+  it('mapMeta and outlineCorners default to null', () => {
+    const s = useBuild.getState();
+    expect(s.mapMeta).toBeNull();
+    expect(s.outlineCorners).toBeNull();
+  });
+
+  it('setMeasuredMapMeta initializes outlineCorners from mapMeta.sw/ne (sw, nw, ne, se order) when none is set yet', () => {
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    const s = useBuild.getState();
+    expect(s.mapMeta).toEqual(MAP_META);
+    expect(s.outlineCorners).toEqual(BBOX_CORNERS);
+  });
+
+  it('setMeasuredMapMeta(null) clears both fields', () => {
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    expect(useBuild.getState().mapMeta).not.toBeNull();
+
+    useBuild.getState().setMeasuredMapMeta(null);
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toBeNull();
+    expect(s.outlineCorners).toBeNull();
+  });
+
+  it('re-calling setMeasuredMapMeta with the same mapMeta does NOT clobber an already-adjusted outlineCorners', () => {
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    useBuild.getState().setOutlineAdjusted(2150, ADJUSTED_CORNERS);
+    expect(useBuild.getState().outlineCorners).toEqual(ADJUSTED_CORNERS);
+
+    // Simulates StepHome's phase-sync effect re-running (e.g. re-render,
+    // or Cancel returning to the confirm phase with the same mapMeta).
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toEqual(MAP_META);
+    expect(s.outlineCorners).toEqual(ADJUSTED_CORNERS);
+  });
+
+  const OTHER_MAP_META = {
+    centerLat: 27.1,
+    centerLng: -82.1,
+    zoom: 19,
+    sw: { lat: 27.0999, lng: -82.1001 },
+    ne: { lat: 27.1001, lng: -82.0999 },
+    imgW: 1280,
+    imgH: 800,
+  };
+  const OTHER_BBOX_CORNERS = [
+    { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.sw.lng },
+    { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.sw.lng },
+    { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.ne.lng },
+    { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.ne.lng },
+  ];
+
+  it('setMeasuredMapMeta re-initializes outlineCorners from the NEW bbox when the incoming mapMeta DIFFERS from the stored one and the corners were never adjusted (feedback round 6 fix)', () => {
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    expect(useBuild.getState().outlineCorners).toEqual(BBOX_CORNERS);
+
+    // A genuinely different mapMeta -- e.g. a re-measurement for the same
+    // address text via a newly picked, more specific placeId (the
+    // wrong-building recovery flow). Corners were never hand-adjusted
+    // (outlineSource is still null), so they must reset to the NEW box's
+    // bbox, not keep the OLD building's rectangle.
+    useBuild.getState().setMeasuredMapMeta(OTHER_MAP_META);
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toEqual(OTHER_MAP_META);
+    expect(s.outlineCorners).toEqual(OTHER_BBOX_CORNERS);
+  });
+
+  it('setMeasuredMapMeta KEEPS the hand-adjusted corners across a DIFFERENT mapMeta when outlineSource is "adjusted" (frame-independent lat/lng)', () => {
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    useBuild.getState().setOutlineAdjusted(2150, ADJUSTED_CORNERS);
+    expect(useBuild.getState().outlineSource).toBe('adjusted');
+
+    useBuild.getState().setMeasuredMapMeta(OTHER_MAP_META);
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toEqual(OTHER_MAP_META);
+    expect(s.outlineCorners).toEqual(ADJUSTED_CORNERS);
+  });
+
+  it('round-trips through persist storage (serialize then rehydrate) including an adjustment', async () => {
+    useBuild.getState().setAddress('1530 Main St, Sarasota, FL');
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    useBuild.getState().setOutlineAdjusted(2150, ADJUSTED_CORNERS);
+
+    const raw = localStorage.getItem(STORAGE_KEY);
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw as string);
+    expect(parsed.state.mapMeta).toEqual(MAP_META);
+    expect(parsed.state.outlineCorners).toEqual(ADJUSTED_CORNERS);
+
+    useBuild.setState({ mapMeta: null, outlineCorners: null });
+    localStorage.setItem(STORAGE_KEY, raw as string);
+    await useBuild.persist.rehydrate();
+
+    const rehydrated = useBuild.getState();
+    expect(rehydrated.mapMeta).toEqual(MAP_META);
+    expect(rehydrated.outlineCorners).toEqual(ADJUSTED_CORNERS);
+  });
+
+  it('setAddress with a DIFFERENT address clears mapMeta and outlineCorners too', () => {
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL');
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    useBuild.getState().setOutlineAdjusted(2150, ADJUSTED_CORNERS);
+
+    useBuild.getState().setAddress('456 Ocean Dr, Miami, FL');
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toBeNull();
+    expect(s.outlineCorners).toBeNull();
+  });
+
+  it('setAddress with the SAME address leaves mapMeta and outlineCorners untouched', () => {
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL');
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    useBuild.getState().setOutlineAdjusted(2150, ADJUSTED_CORNERS);
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL');
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toEqual(MAP_META);
+    expect(s.outlineCorners).toEqual(ADJUSTED_CORNERS);
+  });
+
+  it('rehydrates cleanly from a pre-round-6 persisted blob that has no mapMeta/outlineCorners keys', async () => {
+    const legacyBlob = JSON.stringify({
+      state: {
+        address: '42 Wallaby Way',
+        outlineSqft: 2000,
+        sq: 24,
+        outlineSource: 'satellite',
+        shingle: 'iko-cambridge',
+        color: 'Dual Black',
+        underlayment: 'synthetic',
+        dripEdge: null,
+        accepted: false,
+        contact: null,
+        visit: null,
+      },
+      version: 0,
+    });
+
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlob);
+
+    await useBuild.persist.rehydrate();
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('42 Wallaby Way');
+    expect(s.mapMeta).toBeNull();
+    expect(s.outlineCorners).toBeNull();
   });
 });
 

@@ -13,6 +13,15 @@ export interface MapMeta {
   imgH: number;
 }
 
+// One corner of the roof-outline quad (feedback round 6). The store keeps
+// exactly 4 of these, ordered sw -> nw -> ne -> se, as the single source of
+// truth the confirm card's read-only overlay and the adjust-outline
+// editor's draggable one both render from.
+export interface LatLngCorner {
+  lat: number;
+  lng: number;
+}
+
 function isLatLng(x: unknown): x is { lat: number; lng: number } {
   if (!x || typeof x !== 'object') return false;
   const p = x as Record<string, unknown>;

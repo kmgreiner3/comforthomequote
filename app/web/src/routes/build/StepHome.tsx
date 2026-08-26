@@ -4,8 +4,9 @@ import { AccuracyNotice, BackChevron, CheckMark, PrimaryButton, SecondaryLinkBut
 import { RevealGroup, RevealItem } from './motion';
 import { getMeasurementAttempt, setMeasurementAttempt } from './measurementAttempt';
 import { formatFootprintSqft } from '../../lib/format';
-import { isMapMeta, type MapMeta } from '../../lib/mapMeta';
+import { isMapMeta, type LatLngCorner, type MapMeta } from '../../lib/mapMeta';
 import RoofOutlineEditor from './RoofOutlineEditor';
+import RoofOutlineOverlay from './RoofOutlineOverlay';
 
 const MIN_SQFT = 500;
 const MAX_SQFT = 15000;
@@ -22,7 +23,9 @@ type Phase =
   | { kind: 'confirm'; sqft: number; imageUrl?: string; mapMeta?: MapMeta; adjusted: boolean }
   // Entered via "Adjust outline"; sqft/adjusted here are what Cancel
   // reverts to (the confirm phase's own state at the moment of entry).
-  | { kind: 'editor'; sqft: number; imageUrl: string; mapMeta: MapMeta; adjusted: boolean }
+  // mapMeta/corners for the editor itself come from the store (the single
+  // source of truth, feedback round 6), not from this phase.
+  | { kind: 'editor'; sqft: number; imageUrl: string; adjusted: boolean }
   | { kind: 'form' }
   | { kind: 'outside-florida' };
 
@@ -94,6 +97,13 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   const setOutlineAdjusted = useBuild((s) => s.setOutlineAdjusted);
   const setPropertyImageUrl = useBuild((s) => s.setPropertyImageUrl);
   const propertyImageUrl = useBuild((s) => s.propertyImageUrl);
+  const setMeasuredMapMeta = useBuild((s) => s.setMeasuredMapMeta);
+  // Single source of truth for the outline quad (feedback round 6): both
+  // the confirm card's read-only overlay and the adjust-outline editor
+  // render from these, never from local phase state, so they can never
+  // show a different rectangle than what's actually stored.
+  const mapMeta = useBuild((s) => s.mapMeta);
+  const outlineCorners = useBuild((s) => s.outlineCorners);
   const savedOutline = useBuild((s) => s.outlineSqft);
   const outlineSource = useBuild((s) => s.outlineSource);
   const address = useBuild((s) => s.address);
@@ -119,6 +129,7 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   useEffect(() => {
     if (phase.kind === 'confirm') {
       setPropertyImageUrl(phase.imageUrl ?? null);
+      setMeasuredMapMeta(phase.mapMeta ?? null);
       setImgFailed(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,19 +237,19 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   }
 
   function handleAdjustOutline() {
-    if (phase.kind !== 'confirm' || !phase.mapMeta || !phase.imageUrl || imgFailed) return;
-    setPhase({ kind: 'editor', sqft: phase.sqft, imageUrl: phase.imageUrl, mapMeta: phase.mapMeta, adjusted: phase.adjusted });
+    if (phase.kind !== 'confirm' || !mapMeta || !outlineCorners || !phase.imageUrl || imgFailed) return;
+    setPhase({ kind: 'editor', sqft: phase.sqft, imageUrl: phase.imageUrl, adjusted: phase.adjusted });
   }
 
-  function handleApplyAdjustedOutline(sqft: number) {
+  function handleApplyAdjustedOutline(sqft: number, corners: LatLngCorner[]) {
     if (phase.kind !== 'editor') return;
-    setOutlineAdjusted(sqft);
-    setPhase({ kind: 'confirm', sqft, imageUrl: phase.imageUrl, mapMeta: phase.mapMeta, adjusted: true });
+    setOutlineAdjusted(sqft, corners);
+    setPhase({ kind: 'confirm', sqft, imageUrl: phase.imageUrl, mapMeta: mapMeta ?? undefined, adjusted: true });
   }
 
   function handleCancelAdjustOutline() {
     if (phase.kind !== 'editor') return;
-    setPhase({ kind: 'confirm', sqft: phase.sqft, imageUrl: phase.imageUrl, mapMeta: phase.mapMeta, adjusted: phase.adjusted });
+    setPhase({ kind: 'confirm', sqft: phase.sqft, imageUrl: phase.imageUrl, mapMeta: mapMeta ?? undefined, adjusted: phase.adjusted });
   }
 
   if (phase.kind === 'loading') {
@@ -301,20 +312,24 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
           />
         </RevealItem>
 
-        <RevealItem>
-          <RoofOutlineEditor
-            imageUrl={phase.imageUrl}
-            mapMeta={phase.mapMeta}
-            onApply={handleApplyAdjustedOutline}
-            onCancel={handleCancelAdjustOutline}
-          />
-        </RevealItem>
+        {mapMeta && outlineCorners && (
+          <RevealItem>
+            <RoofOutlineEditor
+              imageUrl={phase.imageUrl}
+              mapMeta={mapMeta}
+              corners={outlineCorners}
+              initialSqft={phase.sqft}
+              onApply={handleApplyAdjustedOutline}
+              onCancel={handleCancelAdjustOutline}
+            />
+          </RevealItem>
+        )}
       </RevealGroup>
     );
   }
 
   if (phase.kind === 'confirm') {
-    const canAdjustOutline = Boolean(phase.mapMeta) && Boolean(phase.imageUrl) && !imgFailed;
+    const canAdjustOutline = Boolean(mapMeta) && Boolean(outlineCorners) && Boolean(phase.imageUrl) && !imgFailed;
     return (
       <RevealGroup>
         <RevealItem>
@@ -328,12 +343,29 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
 
         {propertyImageUrl && !imgFailed && (
           <RevealItem>
-            <img
-              src={propertyImageUrl}
-              alt="Aerial view with your roof outlined"
-              className="max-h-[260px] w-full max-w-sm rounded-2xl object-cover"
-              onError={() => setImgFailed(true)}
-            />
+            {mapMeta && outlineCorners ? (
+              <RoofOutlineOverlay
+                imageUrl={propertyImageUrl}
+                alt="Aerial view with your roof outlined"
+                mapMeta={mapMeta}
+                corners={outlineCorners}
+                objectFit="cover"
+                className="max-h-[260px] w-full max-w-sm rounded-2xl"
+                style={{ aspectRatio: `${mapMeta.imgW} / ${mapMeta.imgH}` }}
+                imgClassName="block h-full w-full object-cover"
+                onImgError={() => setImgFailed(true)}
+              />
+            ) : (
+              // Older persisted state (or a measurement with no bounding
+              // box) has no mapMeta/corners to draw an overlay from --
+              // render the plain aerial photo instead of crashing.
+              <img
+                src={propertyImageUrl}
+                alt="Aerial view with your roof outlined"
+                className="max-h-[260px] w-full max-w-sm rounded-2xl object-cover"
+                onError={() => setImgFailed(true)}
+              />
+            )}
           </RevealItem>
         )}
 
