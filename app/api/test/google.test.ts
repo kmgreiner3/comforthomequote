@@ -234,30 +234,19 @@ describe('getStaticMapPng', () => {
     expect(png).toBeNull();
   });
 
-  it('draws a polygon overlay path with the 5 bounding-box corners, centered on the box with a computed tight-fit zoom', async () => {
+  it('golden: draws NO path overlay (feedback round 6 -- outline is drawn client-side now), but keeps the same center/zoom framing as before', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
     vi.stubGlobal('fetch', fetchMock);
 
     await getStaticMapPng(27.95, -82.46, 'fake-key', BBOX_FIXTURE);
 
     const requestedUrl = new URL(fetchMock.mock.calls[0]![0] as string);
-    const path = decodeURIComponent(requestedUrl.searchParams.get('path')!);
-    expect(path).toContain('color:0x2563C9FF');
-    expect(path).toContain('weight:3');
-    expect(path).toContain('fillcolor:0x2563C933');
-    const points = [
-      '27.949,-82.461',
-      '27.951,-82.461',
-      '27.951,-82.459',
-      '27.949,-82.459',
-      '27.949,-82.461',
-    ];
-    expect(path.split('|').slice(-5)).toEqual(points);
-    // Static Maps auto-fit (no center/zoom) framed the whole city grid
-    // around the building instead of the building itself -- center on the
-    // bbox centroid at a computed zoom instead. BBOX_FIXTURE's larger span
-    // is its ~222.6m lat side (see the computeOverlayZoom tests below for
-    // the arithmetic); that clamps to zoom 18 here.
+    expect(requestedUrl.searchParams.has('path')).toBe(false);
+    // Framing itself must not change: still centered on the bbox centroid
+    // at the same computed tight-fit zoom as before the outline was
+    // removed. BBOX_FIXTURE's larger span is its ~222.6m lat side (see the
+    // computeOverlayZoom tests below for the arithmetic); that clamps to
+    // zoom 18 here.
     expect(requestedUrl.searchParams.get('center')).toBe('27.950000000000003,-82.46000000000001');
     expect(requestedUrl.searchParams.get('zoom')).toBe(String(computeOverlayZoom(BBOX_FIXTURE)));
     expect(requestedUrl.searchParams.get('zoom')).toBe('18');
