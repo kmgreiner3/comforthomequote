@@ -41,6 +41,7 @@ export default function RoofOutlineEditor({
   imageUrl,
   mapMeta,
   corners: initialCorners,
+  initialSqft,
   onApply,
   onCancel,
 }: {
@@ -51,6 +52,15 @@ export default function RoofOutlineEditor({
   // prior adjustment starts from the adjusted shape, not the original
   // satellite bounding box. Same sw -> nw -> ne -> se order as the store.
   corners: LatLngCorner[];
+  // The footprint sq ft the confirm card was already showing (Solar's own
+  // roof-area measurement, or a prior adjustment) -- displayed as-is until
+  // the homeowner actually moves a corner. Solar's roof polygon area is
+  // never equal to the bbox RECTANGLE's own shoelace area (a bounding
+  // rectangle is always larger than the irregular roof it circumscribes),
+  // so deriving the readout from `corners` from the very first render
+  // would make the number visibly jump the instant the editor opens, before
+  // the homeowner has touched anything.
+  initialSqft: number;
   onApply: (sqft: number, corners: LatLngCorner[]) => void;
   onCancel: () => void;
 }) {
@@ -61,12 +71,17 @@ export default function RoofOutlineEditor({
     initialCorners.map(({ lat, lng }) => latLngToImagePx(lat, lng, mapMeta))
   );
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  // Flips true the first time a corner actually moves -- see `initialSqft`.
+  const [hasAdjusted, setHasAdjusted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Recomputed on every corner change -- cheap (4-point shoelace) enough
-  // to run on every drag frame, giving the "about N sq ft" readout below a
-  // live update while dragging.
+  // to run on every drag frame. This is what "Use this outline" always
+  // submits, regardless of what the readout below is currently showing.
   const liveSqft = useMemo(() => computeSqft(corners, mapMeta), [corners, mapMeta]);
+  // The readout itself: the stored footprint until the first drag, then the
+  // live geometry -- see `initialSqft` above for why.
+  const displaySqft = hasAdjusted ? liveSqft : initialSqft;
 
   // For the shared overlay's polygon (and for "Use this outline"'s
   // onApply): projected back to lat/lng from the current pixel state. A
@@ -79,6 +94,7 @@ export default function RoofOutlineEditor({
     if (!rect || rect.width === 0 || rect.height === 0) return;
     const x = clamp(((clientX - rect.left) / rect.width) * mapMeta.imgW, 0, mapMeta.imgW);
     const y = clamp(((clientY - rect.top) / rect.height) * mapMeta.imgH, 0, mapMeta.imgH);
+    setHasAdjusted(true);
     setCorners((prev) => prev.map((c, i) => (i === index ? { x, y } : c)));
   }
 
@@ -112,7 +128,7 @@ export default function RoofOutlineEditor({
         mapMeta={mapMeta}
         corners={latLngCorners}
         objectFit="none"
-        className="relative w-full touch-none select-none overflow-hidden rounded-2xl"
+        className="w-full touch-none select-none rounded-2xl"
         imgClassName="block w-full"
       >
         {corners.map((c, i) => (
@@ -135,7 +151,7 @@ export default function RoofOutlineEditor({
       </RoofOutlineOverlay>
 
       <p className="mt-3 text-sm font-medium text-navy-950" aria-live="polite" data-testid="roof-outline-live-sqft">
-        About {formatFootprintSqft(liveSqft)} sq ft
+        About {formatFootprintSqft(displaySqft)} sq ft
       </p>
       {!isValidSqft(liveSqft) && (
         <p className="mt-2 text-sm text-red-600">

@@ -17,6 +17,14 @@ const PRESERVE_ASPECT_RATIO = {
 
 export type OverlayObjectFit = keyof typeof PRESERVE_ASPECT_RATIO;
 
+// Always applied to the container, regardless of what `className` adds.
+// `relative` is load-bearing: the svg overlay below is `absolute
+// inset-0`-positioned against this box, so a caller-supplied className
+// that happens to omit it must not be able to silently break the quad's
+// registration to the photo. `overflow-hidden` matches every current
+// caller and is harmless to always include.
+const BASE_CONTAINER_CLASSNAME = 'relative overflow-hidden';
+
 export interface RoofOutlineOverlayProps {
   imageUrl: string;
   alt: string;
@@ -53,7 +61,7 @@ const RoofOutlineOverlay = forwardRef<HTMLDivElement, RoofOutlineOverlayProps>(f
     <div
       ref={ref}
       data-testid={containerTestId}
-      className={className ?? 'relative w-full overflow-hidden'}
+      className={`${BASE_CONTAINER_CLASSNAME} ${className ?? 'w-full'}`}
       style={style}
     >
       <img

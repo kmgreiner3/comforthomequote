@@ -276,7 +276,7 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
     expect(getMeasurementAttempt()).not.toBeNull();
   });
 
-  it('setAddress with the SAME address but a NEWLY PICKED (different) placeId records it and clears the measurement attempt, without touching anything else', () => {
+  it('setAddress with the SAME address but a NEWLY PICKED (different) placeId records it and clears the measurement attempt, without touching outlineSqft/propertyImageUrl', () => {
     const s0 = useBuild.getState();
     s0.setAddress('123 Palm Ave, Tampa, FL 33602'); // free-typed, no placeId yet
     s0.setOutline(2000);
@@ -292,10 +292,42 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
     // The measurement-attempt cache is cleared so /api/measure retries via
     // the new exact-match geocode...
     expect(getMeasurementAttempt()).toBeNull();
-    // ...but nothing else about the existing configuration is touched --
-    // it's still the same physical address.
+    // ...but outlineSqft/propertyImageUrl are left alone here -- they get
+    // overwritten in due course when the re-measurement resolves.
     expect(s.outlineSqft).toBe(2000);
     expect(s.propertyImageUrl).toBe('https://example.com/aerial.png');
+  });
+
+  it('setAddress with the SAME address but a NEWLY PICKED placeId clears mapMeta/outlineCorners (feedback round 6: the wrong-building recovery flow)', () => {
+    // Simulates the round-5 recovery flow: a free-typed address measured
+    // the WRONG building (mapMeta/outlineCorners/propertyImageUrl already
+    // synced into the store from that wrong measurement's confirm phase),
+    // then the homeowner picks the exact building from autocomplete for
+    // the SAME address text.
+    const wrongBuildingMapMeta = {
+      centerLat: 27.1,
+      centerLng: -82.1,
+      zoom: 19,
+      sw: { lat: 27.0999, lng: -82.1001 },
+      ne: { lat: 27.1001, lng: -82.0999 },
+      imgW: 1280,
+      imgH: 800,
+    };
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602');
+    s0.setMeasuredMapMeta(wrongBuildingMapMeta);
+    s0.setPropertyImageUrl('https://example.com/wrong-building.png');
+    expect(useBuild.getState().outlineCorners).not.toBeNull();
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/exact-match-123');
+
+    const s = useBuild.getState();
+    expect(s.placeId).toBe('places/exact-match-123');
+    // The old building's bbox/corners must NOT stay stashed -- otherwise
+    // they'd get drawn over the new building's photo once the
+    // re-measurement lands (the actual reported bug).
+    expect(s.mapMeta).toBeNull();
+    expect(s.outlineCorners).toBeNull();
   });
 
   it('setAddress with the SAME address and the SAME placeId (re-passed) is still a full no-op', () => {
@@ -453,6 +485,50 @@ describe('useBuild store: mapMeta / outlineCorners (feedback round 6)', () => {
 
     const s = useBuild.getState();
     expect(s.mapMeta).toEqual(MAP_META);
+    expect(s.outlineCorners).toEqual(ADJUSTED_CORNERS);
+  });
+
+  const OTHER_MAP_META = {
+    centerLat: 27.1,
+    centerLng: -82.1,
+    zoom: 19,
+    sw: { lat: 27.0999, lng: -82.1001 },
+    ne: { lat: 27.1001, lng: -82.0999 },
+    imgW: 1280,
+    imgH: 800,
+  };
+  const OTHER_BBOX_CORNERS = [
+    { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.sw.lng },
+    { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.sw.lng },
+    { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.ne.lng },
+    { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.ne.lng },
+  ];
+
+  it('setMeasuredMapMeta re-initializes outlineCorners from the NEW bbox when the incoming mapMeta DIFFERS from the stored one and the corners were never adjusted (feedback round 6 fix)', () => {
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    expect(useBuild.getState().outlineCorners).toEqual(BBOX_CORNERS);
+
+    // A genuinely different mapMeta -- e.g. a re-measurement for the same
+    // address text via a newly picked, more specific placeId (the
+    // wrong-building recovery flow). Corners were never hand-adjusted
+    // (outlineSource is still null), so they must reset to the NEW box's
+    // bbox, not keep the OLD building's rectangle.
+    useBuild.getState().setMeasuredMapMeta(OTHER_MAP_META);
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toEqual(OTHER_MAP_META);
+    expect(s.outlineCorners).toEqual(OTHER_BBOX_CORNERS);
+  });
+
+  it('setMeasuredMapMeta KEEPS the hand-adjusted corners across a DIFFERENT mapMeta when outlineSource is "adjusted" (frame-independent lat/lng)', () => {
+    useBuild.getState().setMeasuredMapMeta(MAP_META);
+    useBuild.getState().setOutlineAdjusted(2150, ADJUSTED_CORNERS);
+    expect(useBuild.getState().outlineSource).toBe('adjusted');
+
+    useBuild.getState().setMeasuredMapMeta(OTHER_MAP_META);
+
+    const s = useBuild.getState();
+    expect(s.mapMeta).toEqual(OTHER_MAP_META);
     expect(s.outlineCorners).toEqual(ADJUSTED_CORNERS);
   });
 

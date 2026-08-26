@@ -69,6 +69,37 @@ describe('RoofOutlineOverlay', () => {
     expect(adjustedPoints).toBe(expectedPointsAttr(adjusted, MAP_META));
   });
 
+  it('always includes "relative" and "overflow-hidden" on the container, merged with a caller className that omits them (feedback round 6)', () => {
+    const { container } = render(
+      <RoofOutlineOverlay
+        imageUrl="aerial.png"
+        alt="Aerial view"
+        mapMeta={MAP_META}
+        corners={BBOX_CORNERS}
+        className="w-64 rounded-2xl"
+      />
+    );
+    const div = container.querySelector('div');
+    // A caller can never silently drop `relative` (load-bearing: the svg
+    // overlay is absolutely positioned against this box) just by passing a
+    // className that doesn't mention it.
+    expect(div?.className).toContain('relative');
+    expect(div?.className).toContain('overflow-hidden');
+    // The caller's own classes are still applied, not replaced.
+    expect(div?.className).toContain('w-64');
+    expect(div?.className).toContain('rounded-2xl');
+  });
+
+  it('falls back to a default w-full when no className is given, still merged with the base classes', () => {
+    const { container } = render(
+      <RoofOutlineOverlay imageUrl="aerial.png" alt="Aerial view" mapMeta={MAP_META} corners={BBOX_CORNERS} />
+    );
+    const div = container.querySelector('div');
+    expect(div?.className).toContain('relative');
+    expect(div?.className).toContain('overflow-hidden');
+    expect(div?.className).toContain('w-full');
+  });
+
   it('defaults to object-cover framing ("xMidYMid slice") for the read-only confirm-card use', () => {
     const { container } = render(
       <RoofOutlineOverlay imageUrl="aerial.png" alt="Aerial view" mapMeta={MAP_META} corners={BBOX_CORNERS} />

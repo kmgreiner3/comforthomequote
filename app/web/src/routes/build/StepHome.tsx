@@ -318,6 +318,7 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
               imageUrl={phase.imageUrl}
               mapMeta={mapMeta}
               corners={outlineCorners}
+              initialSqft={phase.sqft}
               onApply={handleApplyAdjustedOutline}
               onCancel={handleCancelAdjustOutline}
             />
@@ -349,7 +350,7 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
                 mapMeta={mapMeta}
                 corners={outlineCorners}
                 objectFit="cover"
-                className="relative max-h-[260px] w-full max-w-sm overflow-hidden rounded-2xl"
+                className="max-h-[260px] w-full max-w-sm rounded-2xl"
                 style={{ aspectRatio: `${mapMeta.imgW} / ${mapMeta.imgH}` }}
                 imgClassName="block h-full w-full object-cover"
                 onImgError={() => setImgFailed(true)}

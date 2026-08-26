@@ -27,6 +27,21 @@ function cornersFromMapMeta(m: MapMeta): LatLngCorner[] {
   ];
 }
 
+// Field-by-field (not JSON.stringify) so key order never matters.
+function mapMetaEquals(a: MapMeta, b: MapMeta): boolean {
+  return (
+    a.centerLat === b.centerLat &&
+    a.centerLng === b.centerLng &&
+    a.zoom === b.zoom &&
+    a.imgW === b.imgW &&
+    a.imgH === b.imgH &&
+    a.sw.lat === b.sw.lat &&
+    a.sw.lng === b.sw.lng &&
+    a.ne.lat === b.ne.lat &&
+    a.ne.lng === b.ne.lng
+  );
+}
+
 export type DripEdge = 'White' | 'Black' | 'Brown';
 
 export interface Contact {
@@ -90,10 +105,17 @@ export interface BuildState {
   // the SAME address (string equality against the current value) with an
   // unchanged (or omitted) placeId is a no-op -- nothing is cleared,
   // nothing is rewritten. Setting the SAME address but a NEWLY PICKED,
-  // different placeId records just that placeId and clears the
-  // measurement-attempt cache (so /api/measure retries via the new exact-
-  // match geocode), without touching anything else. Setting a DIFFERENT
-  // address clears outline/sq/outlineSource/propertyImageUrl (the prior
+  // different placeId (the round-5 wrong-building recovery flow: a
+  // free-typed or ambiguous address measured the wrong building, so the
+  // homeowner re-picks the exact one from autocomplete) records just that
+  // placeId, clears the measurement-attempt cache (so /api/measure retries
+  // via the new exact-match geocode), and clears mapMeta/outlineCorners too
+  // -- otherwise the OLD building's bbox/corners would stay stashed and get
+  // drawn over the NEW building's photo once the re-measurement lands.
+  // outlineSqft/sq/outlineSource/propertyImageUrl are deliberately left
+  // alone here (unlike the different-address branch below): they get
+  // overwritten in due course when the re-measurement resolves. Setting a
+  // DIFFERENT address clears outline/sq/outlineSource/propertyImageUrl (the prior
   // measurement no longer applies to a different property) and the
   // measurement-attempt cache, but deliberately leaves shingle/color/
   // underlayment/dripEdge/accepted/contact/visit untouched so switching
@@ -111,12 +133,14 @@ export interface BuildState {
   setOutlineAdjusted(sqft: number, corners: LatLngCorner[]): void;
   // Called once per successful measurement (see StepHome) with the mapMeta
   // the response returned, or null when there's no bounding box to draw.
-  // Initializes outlineCorners from the box's sw/ne corners ONLY when
-  // there isn't already a value for this address (a prior adjustment, or
-  // an earlier initialization this same visit) -- so re-syncing on every
-  // render, or re-fetching after the session-scoped measurement-attempt
-  // cache is gone, never clobbers a homeowner's adjustment back to the
-  // original bbox. A null mapMeta clears both fields together.
+  // Re-syncing the SAME mapMeta (a re-render, or Cancel returning to the
+  // confirm phase) leaves outlineCorners alone. A DIFFERENT mapMeta (a
+  // genuine re-measurement -- e.g. the same-address-new-placeId recovery
+  // flow above) re-initializes outlineCorners from the NEW box's sw/ne,
+  // UNLESS outlineSource === 'adjusted': a homeowner's hand-adjusted
+  // corners are absolute lat/lng, not tied to any particular mapMeta
+  // frame, so they're kept rather than reset even across a re-measurement.
+  // A null mapMeta clears both fields together.
   setMeasuredMapMeta(mapMeta: MapMeta | null): void;
   setPropertyImageUrl(url: string | null): void;
   setShingle(k: ShingleKey): void;
@@ -192,7 +216,7 @@ export const useBuild = create<BuildState>()(
           // changes: it's still the same physical address.
           if (placeId === undefined || placeId === get().placeId) return;
           clearMeasurementAttempt();
-          set({ placeId });
+          set({ placeId, mapMeta: null, outlineCorners: null });
           return;
         }
         clearMeasurementAttempt();
@@ -228,7 +252,19 @@ export const useBuild = create<BuildState>()(
           set({ mapMeta: null, outlineCorners: null });
           return;
         }
-        set({ mapMeta, outlineCorners: get().outlineCorners ?? cornersFromMapMeta(mapMeta) });
+        const state = get();
+        const isSameFrame = state.mapMeta != null && mapMetaEquals(state.mapMeta, mapMeta);
+        // Keep the existing corners across a re-sync of the SAME frame
+        // (idempotent), or when the homeowner has hand-adjusted them
+        // (frame-independent lat/lng, kept even across a genuine
+        // re-measurement). Otherwise -- a DIFFERENT frame, not yet
+        // adjusted -- re-initialize from the new box's bbox rather than
+        // keeping a stale rectangle registered to the old photo.
+        const keepExistingCorners = state.outlineCorners != null && (isSameFrame || state.outlineSource === 'adjusted');
+        set({
+          mapMeta,
+          outlineCorners: keepExistingCorners ? state.outlineCorners : cornersFromMapMeta(mapMeta),
+        });
       },
       setPropertyImageUrl: (url) => set({ propertyImageUrl: url }),
       // Changing shingle resets color: the two products have different color
