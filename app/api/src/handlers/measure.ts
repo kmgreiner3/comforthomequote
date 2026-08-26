@@ -7,6 +7,8 @@ import { checkAndIncrement, todayStamp } from '../lib/ratelimit';
 import type { BoundingBox } from '../lib/google';
 import {
   buildMapMeta,
+  buildSeedCorners,
+  buildSeedMapMeta,
   geocodeAddress,
   geocodeByPlaceId,
   getGoogleApiKey,
@@ -46,20 +48,26 @@ function imageCacheIdentity(address: string | undefined, placeId: string | undef
   return placeId ? `placeid:${placeId}` : normalizeAddress(address!);
 }
 
-// v4: drops the path= polygon overlay entirely (feedback round 6) -- the
-// roof outline is now always drawn client-side as an SVG overlay from
-// mapMeta's corners, because a server-baked pixel outline can never reflect
-// a client-side adjustment (the reported bug). v3's cached images have the
-// old outline baked in and must not be served for a v4 request; bumping the
-// prefix forces a regenerate. (v3: computed-zoom tight framing; v2's
-// auto-fit framed the whole city grid around a small building instead of
-// the roof itself.) The old maps/* objects age out on their own via the
-// existing lifecycle rule (its "maps/" prefix still covers "maps/v4/*"),
-// and the measure Lambda's IAM policy already scopes to "maps/*", which
-// also still covers "maps/v4/*".
+// v5: the no-solar-data path (feedback round 7) now fetches/caches an
+// aerial for an identity that previously never got one at all (a Solar miss
+// used to dead-end before ever calling getPropertyImageUrl), AND that path
+// shares this same cache identity (address/placeId) with the found:true
+// path -- so without a version bump, an address whose Solar coverage
+// changes between calls could serve a stale image framed for the WRONG
+// scenario (e.g. a tightly-framed bounding-box image reused for the
+// zoom-20 seed-outline framing, or vice versa). Bumping the prefix forces a
+// fresh fetch under the current framing decision for every identity. (v4:
+// dropped the path= polygon overlay entirely -- the roof outline is drawn
+// client-side as an SVG overlay from mapMeta's corners instead, because a
+// server-baked pixel outline can never reflect a client-side adjustment.
+// v3: computed-zoom tight framing; v2's auto-fit framed the whole city grid
+// around a small building instead of the roof itself.) The old maps/*
+// objects age out on their own via the existing lifecycle rule (its
+// "maps/" prefix still covers "maps/v5/*"), and the measure Lambda's IAM
+// policy already scopes to "maps/*", which also still covers "maps/v5/*".
 function mapCacheKey(identity: string): string {
   const hash = createHash('sha256').update(identity).digest('hex');
-  return `maps/v4/${hash}.png`;
+  return `maps/v5/${hash}.png`;
 }
 
 // Best-effort property aerial photo: fetches (or reuses a cached) a CLEAN
@@ -139,7 +147,21 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
   const solar = await getGroundAreaSqft(geocode.lat!, geocode.lng!, apiKey);
   if (solar === null) {
-    return json(200, { found: false, reason: 'no-roof-data' });
+    // No Solar building data at all -- but the geocode succeeded and it's
+    // in Florida, so there's still a point to show an aerial for and a
+    // plausible starting rectangle to trace from (feedback round 7): this
+    // is what lets the frontend offer roof tracing instead of demanding a
+    // manual square-footage number.
+    const identity = imageCacheIdentity(address, placeId);
+    const imageUrl = await getPropertyImageUrl(identity, geocode.lat!, geocode.lng!, apiKey, null);
+    return json(200, {
+      found: false,
+      reason: 'no-solar-data',
+      formattedAddress: geocode.formattedAddress,
+      ...(imageUrl ? { imageUrl } : {}),
+      mapMeta: buildSeedMapMeta(geocode.lat!, geocode.lng!),
+      seedCorners: buildSeedCorners(geocode.lat!, geocode.lng!),
+    });
   }
   const { groundAreaSqft: sqft, boundingBox } = solar;
   if (!(sqft > MIN_PLAUSIBLE_SQFT) || !(sqft < MAX_PLAUSIBLE_SQFT)) {
@@ -156,6 +178,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   return json(200, {
     found: true,
     outlineSqft: sqft,
+    formattedAddress: geocode.formattedAddress,
     ...(imageUrl ? { imageUrl } : {}),
     ...(mapMeta ? { mapMeta } : {}),
   });

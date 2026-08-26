@@ -42,6 +42,11 @@ export interface GeocodeResult {
   lat?: number;
   lng?: number;
   state?: string;
+  // Google's canonical, ZIP-inclusive address string (feedback round 7).
+  // Suggestion descriptions from Places Autocomplete omit the postal code,
+  // so this -- not the caller-supplied address/placeId -- is what callers
+  // should surface back to the client and persist as the address of record.
+  formattedAddress?: string;
 }
 
 interface GoogleAddressComponent {
@@ -51,6 +56,7 @@ interface GoogleAddressComponent {
 
 interface GoogleGeocodeResponse {
   results: Array<{
+    formatted_address?: string;
     address_components: GoogleAddressComponent[];
     geometry: { location: { lat: number; lng: number } };
   }>;
@@ -70,6 +76,7 @@ async function fetchGeocode(url: string): Promise<GeocodeResult> {
     lat: result.geometry.location.lat,
     lng: result.geometry.location.lng,
     state: stateComponent?.short_name,
+    formattedAddress: result.formatted_address,
   };
 }
 
@@ -245,6 +252,72 @@ export function buildMapMeta(box: BoundingBox): MapMeta {
     zoom,
     sw: { lat: box.sw.latitude, lng: box.sw.longitude },
     ne: { lat: box.ne.latitude, lng: box.ne.longitude },
+    imgW: MAP_WIDTH_PX * STATIC_MAP_SCALE,
+    imgH: MAP_HEIGHT_PX * STATIC_MAP_SCALE,
+  };
+}
+
+// --- Seed outline for the no-solar-data trace response (feedback round 7) -
+
+// Plausible Florida single-family footprint to seed the trace editor with
+// when Solar has no building data at all (so there is no real bounding box
+// to derive an outline from): a ~12m x 10m rectangle (~1,300 sqft). The
+// north-south span is the LONGER one -- see the ordering comment on
+// buildSeedCorners below, which depends on that.
+const SEED_NS_METERS = 12;
+const SEED_EW_METERS = 10;
+
+export interface SeedCorner {
+  lat: number;
+  lng: number;
+}
+
+// Six points describing a rectangle centered on (lat, lng), in the EXACT
+// order the outline editor consumes them (Task C, feedback round 7):
+//   [0] sw     -- southwest corner
+//   [1] w-mid  -- midpoint of the west edge (sw -> nw)
+//   [2] nw     -- northwest corner
+//   [3] ne     -- northeast corner
+//   [4] e-mid  -- midpoint of the east edge (ne -> se)
+//   [5] se     -- southeast corner
+// The west/east edges are the two LONGER (north-south) edges; their
+// midpoints are what let the editor drag a point inward to trace an
+// L-shaped footprint out of a plain rectangle.
+export function buildSeedCorners(lat: number, lng: number): SeedCorner[] {
+  const latRad = (lat * Math.PI) / 180;
+  const dLat = SEED_NS_METERS / 2 / METERS_PER_DEGREE_LAT;
+  const dLng = SEED_EW_METERS / 2 / (METERS_PER_DEGREE_LAT * Math.cos(latRad));
+  const south = lat - dLat;
+  const north = lat + dLat;
+  const west = lng - dLng;
+  const east = lng + dLng;
+  return [
+    { lat: south, lng: west },
+    { lat, lng: west },
+    { lat: north, lng: west },
+    { lat: north, lng: east },
+    { lat, lng: east },
+    { lat: south, lng: east },
+  ];
+}
+
+// mapMeta for the no-solar-data response: there is no Solar bounding box to
+// frame tightly around, so the map is simply centered on the geocoded point
+// at the max overlay zoom -- the same fallback framing staticMapUrl() uses
+// below when boundingBox is null/undefined. sw/ne report the seed
+// rectangle's own outer corners (there is no real building bbox); the
+// editor's actual source of truth is the seedCorners array above, not
+// these two fields.
+export function buildSeedMapMeta(lat: number, lng: number): MapMeta {
+  const corners = buildSeedCorners(lat, lng);
+  const sw = corners[0]!;
+  const ne = corners[3]!;
+  return {
+    centerLat: lat,
+    centerLng: lng,
+    zoom: MAX_OVERLAY_ZOOM,
+    sw: { lat: sw.lat, lng: sw.lng },
+    ne: { lat: ne.lat, lng: ne.lng },
     imgW: MAP_WIDTH_PX * STATIC_MAP_SCALE,
     imgH: MAP_HEIGHT_PX * STATIC_MAP_SCALE,
   };
