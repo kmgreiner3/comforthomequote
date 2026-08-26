@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   areaM2ToSqft,
+  areaSqftFromLatLngCorners,
   imagePxToLatLng,
   imagePxToMetersFromCenter,
   latLngToImagePx,
   metersPerImagePixel,
+  polygonSelfIntersects,
   shoelaceAreaM2,
+  SQM_TO_SQFT,
 } from './mercator';
 import type { MapMeta } from './mapMeta';
 
@@ -48,6 +51,115 @@ describe('shoelaceAreaM2 + areaM2ToSqft: golden', () => {
     ];
     const ccw = [...cw].reverse();
     expect(shoelaceAreaM2(cw)).toBeCloseTo(shoelaceAreaM2(ccw), 10);
+  });
+
+  // Feedback round 7 (Task C item 4): the outline editor moves from 4
+  // corners to 6, specifically so a homeowner can drag a midpoint inward
+  // and trace an L-shaped footprint. Confirms shoelaceAreaM2 handles that
+  // 6-point n-gon correctly, not just a 4-point rectangle.
+  it('golden: a 6-point L-shape (full 20m x 15m rect minus an 8m x 6m notch) -> 252 m2 -> ~2712.5 sqft', () => {
+    // Boundary traced clockwise starting at the sw corner of the full
+    // 20m(x) x 15m(y) rectangle used by the plain-rectangle golden above;
+    // the notch is cut from the NE quadrant. Hand-computed area: full rect
+    // (20 x 15 = 300 m2) minus the notch (8m wide x 6m tall = 48 m2) =
+    // 252 m2.
+    const lShape = [
+      { dxMeters: -10, dyMeters: -7.5 }, // sw
+      { dxMeters: -10, dyMeters: 7.5 }, // nw
+      { dxMeters: 2, dyMeters: 7.5 }, // notch outer corner (rectangle's ne would be (10, 7.5))
+      { dxMeters: 2, dyMeters: 1.5 }, // notch inner corner
+      { dxMeters: 10, dyMeters: 1.5 }, // notch outer corner (rectangle's e-mid would be (10, 0))
+      { dxMeters: 10, dyMeters: -7.5 }, // se
+    ];
+    const areaM2 = shoelaceAreaM2(lShape);
+    expect(areaM2).toBeCloseTo(252, 6);
+    expect(areaM2ToSqft(areaM2)).toBeCloseTo(252 * SQM_TO_SQFT, 6);
+    expect(areaM2ToSqft(areaM2)).toBeCloseTo(2712.51, 1);
+  });
+});
+
+describe('areaSqftFromLatLngCorners', () => {
+  it('matches the manual latLngToImagePx -> imagePxToMetersFromCenter -> shoelace pipeline', () => {
+    const meta: MapMeta = {
+      centerLat: 27,
+      centerLng: -82.5,
+      zoom: 21,
+      sw: { lat: 27 - 7.5 / 111320, lng: -82.5 - 10 / (111320 * Math.cos((27 * Math.PI) / 180)) },
+      ne: { lat: 27 + 7.5 / 111320, lng: -82.5 + 10 / (111320 * Math.cos((27 * Math.PI) / 180)) },
+      imgW: 1280,
+      imgH: 800,
+    };
+    const corners = [
+      { lat: meta.sw.lat, lng: meta.sw.lng },
+      { lat: meta.ne.lat, lng: meta.sw.lng },
+      { lat: meta.ne.lat, lng: meta.ne.lng },
+      { lat: meta.sw.lat, lng: meta.ne.lng },
+    ];
+
+    const expected = areaM2ToSqft(
+      shoelaceAreaM2(corners.map(({ lat, lng }) => imagePxToMetersFromCenter(latLngToImagePx(lat, lng, meta), meta)))
+    );
+    expect(areaSqftFromLatLngCorners(corners, meta)).toBeCloseTo(expected, 10);
+    expect(areaSqftFromLatLngCorners(corners, meta)).toBeCloseTo(300 * SQM_TO_SQFT, 0);
+  });
+});
+
+// Feedback round 7 (Task C item 4): a self-intersection ("bowtie") guard,
+// needed now that there are 6 draggable points instead of 4 -- a midpoint
+// dragged far enough can cross one of the polygon's other edges.
+describe('polygonSelfIntersects', () => {
+  it('a simple (non-crossing) rectangle -- false', () => {
+    const rect = [
+      { x: 0, y: 100 },
+      { x: 100, y: 100 },
+      { x: 100, y: 0 },
+      { x: 0, y: 0 },
+    ];
+    expect(polygonSelfIntersects(rect)).toBe(false);
+  });
+
+  it('a classic 4-point bowtie (adjacent corners swapped) -- true', () => {
+    // Connecting these in order draws an hourglass: edge (0,0)->(10,10) and
+    // edge (10,0)->(0,10) cross at (5,5).
+    const bowtie = [
+      { x: 0, y: 0 },
+      { x: 10, y: 10 },
+      { x: 10, y: 0 },
+      { x: 0, y: 10 },
+    ];
+    expect(polygonSelfIntersects(bowtie)).toBe(true);
+  });
+
+  it('a simple (non-crossing) 6-point L-shape -- false', () => {
+    // Same L-shape topology as the shoelace golden above, in pixel space.
+    const lShapeHex = [
+      { x: 0, y: 150 }, // sw
+      { x: 0, y: 0 }, // nw
+      { x: 120, y: 0 }, // notch outer corner
+      { x: 120, y: 60 }, // notch inner corner
+      { x: 200, y: 60 }, // notch outer corner
+      { x: 200, y: 150 }, // se
+    ];
+    expect(polygonSelfIntersects(lShapeHex)).toBe(false);
+  });
+
+  it('a 6-point hexagon with one dragged point crossing a far edge -- true', () => {
+    // A rectangle-with-midpoints hexagon (sw, w-mid, nw, ne, e-mid, se)
+    // with w-mid dragged far past the east edge: edge (sw -> w-mid) now
+    // crosses edge (e-mid -> se).
+    const dragged = [
+      { x: 0, y: 10 }, // sw
+      { x: 20, y: 5 }, // w-mid, dragged from (0,5) out to (20,5) -- past the east edge (x=10)
+      { x: 0, y: 0 }, // nw
+      { x: 10, y: 0 }, // ne
+      { x: 10, y: 5 }, // e-mid
+      { x: 10, y: 10 }, // se
+    ];
+    expect(polygonSelfIntersects(dragged)).toBe(true);
+  });
+
+  it('fewer than 4 points can never self-intersect', () => {
+    expect(polygonSelfIntersects([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 1, y: 0 }])).toBe(false);
   });
 });
 

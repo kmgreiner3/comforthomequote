@@ -24,7 +24,7 @@ const s3Mock = mockClient(S3Client);
 
 function expectedMapKey(address: string): string {
   const normalized = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  return `maps/v4/${createHash('sha256').update(normalized).digest('hex')}.png`;
+  return `maps/v5/${createHash('sha256').update(normalized).digest('hex')}.png`;
 }
 
 function pngResponse() {
@@ -277,7 +277,7 @@ describe('measure handler property image', () => {
     expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
   });
 
-  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/v4/<sha256>.png', async () => {
+  it('on a cache miss, fetches the Static Maps PNG and stores it under maps/v5/<sha256>.png', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
     s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
     const fetchMock = vi
@@ -429,6 +429,187 @@ describe('measure handler property image', () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'super-secret-google-key' } });
     s3Mock.on(HeadObjectCommand).resolves({});
     vi.stubGlobal('fetch', flFixture(150));
+
+    const res = await handler(eventFor(ADDRESS));
+
+    expect(res.body as string).not.toContain('super-secret-google-key');
+  });
+});
+
+describe('measure handler formattedAddress', () => {
+  it('golden: includes formattedAddress (ZIP included) on the found:true path', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              formatted_address: '123 Main St, Tampa, FL 33602, USA',
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 27.95, lng: -82.46 } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ boundingBox: BBOX_FIXTURE, solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } } }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor('123 Main St, Tampa, FL'));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(true);
+    expect(parsed.formattedAddress).toBe('123 Main St, Tampa, FL 33602, USA');
+  });
+
+  it('the outside-florida path stays unchanged: no formattedAddress, no imagery', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              formatted_address: '123 Peachtree St, Atlanta, GA 30303, USA',
+              address_components: [{ short_name: 'GA', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 33.75, lng: -84.39 } },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const res = await handler(eventFor('123 Peachtree St, Atlanta, GA'));
+    // Exact equality: confirms no formattedAddress/imageUrl/mapMeta/seedCorners
+    // sneak into this response now that those fields exist elsewhere.
+    expect(JSON.parse(res.body as string)).toEqual({ found: false, reason: 'outside-florida' });
+  });
+
+  it('a geocode failure (not-found) stays unchanged: no formattedAddress, no imagery', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) }));
+
+    const res = await handler(eventFor('nonsense address that geocodes to nothing'));
+    expect(JSON.parse(res.body as string)).toEqual({ found: false, reason: 'not-found' });
+  });
+});
+
+describe('measure handler no-solar-data', () => {
+  const ADDRESS = '456 New Build Ln, Wesley Chapel, FL';
+  const LAT = 28.15;
+  const LNG = -82.31;
+
+  function noSolarFixture() {
+    return vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              formatted_address: '456 New Build Ln, Wesley Chapel, FL 33544, USA',
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: LAT, lng: LNG } },
+            },
+          ],
+        }),
+      })
+      // Solar: no solarPotential at all -- the "no building data" case
+      // this whole path exists for.
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      .mockResolvedValueOnce(pngResponse());
+  }
+
+  it('golden: geocode success + FL + no Solar data returns imagery, formattedAddress, a zoom-20 mapMeta, and 6 seedCorners in the documented order', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    vi.stubGlobal('fetch', noSolarFixture());
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(false);
+    expect(parsed.reason).toBe('no-solar-data');
+    expect(parsed.formattedAddress).toBe('456 New Build Ln, Wesley Chapel, FL 33544, USA');
+    expect(parsed.imageUrl).toBeTruthy();
+
+    // No Solar bbox to frame -- centered on the geocoded point at zoom 20.
+    expect(parsed.mapMeta.centerLat).toBe(LAT);
+    expect(parsed.mapMeta.centerLng).toBe(LNG);
+    expect(parsed.mapMeta.zoom).toBe(20);
+    expect(parsed.mapMeta.imgW).toBe(1280);
+    expect(parsed.mapMeta.imgH).toBe(800);
+
+    // 6 points, in the documented sw / w-mid / nw / ne / e-mid / se order.
+    expect(parsed.seedCorners).toHaveLength(6);
+    const [sw, wMid, nw, ne, eMid, se] = parsed.seedCorners;
+    expect(sw.lng).toBeCloseTo(nw.lng, 9);
+    expect(ne.lng).toBeCloseTo(se.lng, 9);
+    expect(sw.lng).toBeLessThan(ne.lng);
+    expect(sw.lat).toBeCloseTo(se.lat, 9);
+    expect(nw.lat).toBeCloseTo(ne.lat, 9);
+    expect(sw.lat).toBeLessThan(nw.lat);
+    expect(wMid).toEqual({ lat: LAT, lng: sw.lng });
+    expect(eMid).toEqual({ lat: LAT, lng: ne.lng });
+
+    // ~12m x 10m -> ~1,300 sqft, a plausible FL single-family footprint.
+    const nsMeters = (nw.lat - sw.lat) * 111320;
+    const ewMeters = (ne.lng - sw.lng) * 111320 * Math.cos((LAT * Math.PI) / 180);
+    expect(nsMeters).toBeCloseTo(12, 5);
+    expect(ewMeters).toBeCloseTo(10, 5);
+  });
+
+  it('stores the aerial under the v5 cache prefix, same identity as the found path', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    vi.stubGlobal('fetch', noSolarFixture());
+
+    await handler(eventFor(ADDRESS));
+
+    const putCalls = s3Mock.commandCalls(PutObjectCommand);
+    expect(putCalls).toHaveLength(1);
+    expect(putCalls[0]?.args[0].input.Key).toBe(expectedMapKey(ADDRESS));
+  });
+
+  it('a Static Maps failure on the no-solar path still returns the seed outline, just without imageUrl', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              formatted_address: '456 New Build Ln, Wesley Chapel, FL 33544, USA',
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: LAT, lng: LNG } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: false });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.reason).toBe('no-solar-data');
+    expect(parsed).not.toHaveProperty('imageUrl');
+    expect(parsed.seedCorners).toHaveLength(6);
+    expect(parsed.mapMeta).toBeTruthy();
+  });
+
+  it('never leaks the Google API key on the no-solar-data path', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'super-secret-google-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    vi.stubGlobal('fetch', noSolarFixture());
 
     const res = await handler(eventFor(ADDRESS));
 

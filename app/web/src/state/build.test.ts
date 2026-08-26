@@ -427,7 +427,13 @@ describe('useBuild store: setOutlineAdjusted (feedback round 5)', () => {
   });
 });
 
-describe('useBuild store: mapMeta / outlineCorners (feedback round 6)', () => {
+// sw -> w-mid -> nw -> ne -> e-mid -> se (feedback round 7): the midpoint of
+// two lat/lng points is just their arithmetic mean.
+function midpoint(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+}
+
+describe('useBuild store: mapMeta / outlineCorners (feedback round 6; expanded to 6 points in round 7)', () => {
   const MAP_META = {
     centerLat: 27.336230049999998,
     centerLng: -82.539976,
@@ -437,16 +443,17 @@ describe('useBuild store: mapMeta / outlineCorners (feedback round 6)', () => {
     imgW: 1280,
     imgH: 800,
   };
-  const BBOX_CORNERS = [
-    { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng },
-    { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng },
-    { lat: MAP_META.ne.lat, lng: MAP_META.ne.lng },
-    { lat: MAP_META.sw.lat, lng: MAP_META.ne.lng },
-  ];
+  const BBOX_SW = { lat: MAP_META.sw.lat, lng: MAP_META.sw.lng };
+  const BBOX_NW = { lat: MAP_META.ne.lat, lng: MAP_META.sw.lng };
+  const BBOX_NE = { lat: MAP_META.ne.lat, lng: MAP_META.ne.lng };
+  const BBOX_SE = { lat: MAP_META.sw.lat, lng: MAP_META.ne.lng };
+  const BBOX_CORNERS = [BBOX_SW, midpoint(BBOX_SW, BBOX_NW), BBOX_NW, BBOX_NE, midpoint(BBOX_NE, BBOX_SE), BBOX_SE];
   const ADJUSTED_CORNERS = [
     { lat: MAP_META.sw.lat - 0.00001, lng: MAP_META.sw.lng - 0.00001 },
+    { lat: MAP_META.centerLat, lng: MAP_META.sw.lng - 0.00001 },
     { lat: MAP_META.ne.lat + 0.00001, lng: MAP_META.sw.lng - 0.00001 },
     { lat: MAP_META.ne.lat + 0.00001, lng: MAP_META.ne.lng + 0.00001 },
+    { lat: MAP_META.centerLat, lng: MAP_META.ne.lng + 0.00001 },
     { lat: MAP_META.sw.lat - 0.00001, lng: MAP_META.ne.lng + 0.00001 },
   ];
 
@@ -456,7 +463,7 @@ describe('useBuild store: mapMeta / outlineCorners (feedback round 6)', () => {
     expect(s.outlineCorners).toBeNull();
   });
 
-  it('setMeasuredMapMeta initializes outlineCorners from mapMeta.sw/ne (sw, nw, ne, se order) when none is set yet', () => {
+  it('setMeasuredMapMeta initializes outlineCorners from mapMeta.sw/ne (sw, w-mid, nw, ne, e-mid, se order) when none is set yet', () => {
     useBuild.getState().setMeasuredMapMeta(MAP_META);
     const s = useBuild.getState();
     expect(s.mapMeta).toEqual(MAP_META);
@@ -497,11 +504,17 @@ describe('useBuild store: mapMeta / outlineCorners (feedback round 6)', () => {
     imgW: 1280,
     imgH: 800,
   };
+  const OTHER_BBOX_SW = { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.sw.lng };
+  const OTHER_BBOX_NW = { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.sw.lng };
+  const OTHER_BBOX_NE = { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.ne.lng };
+  const OTHER_BBOX_SE = { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.ne.lng };
   const OTHER_BBOX_CORNERS = [
-    { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.sw.lng },
-    { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.sw.lng },
-    { lat: OTHER_MAP_META.ne.lat, lng: OTHER_MAP_META.ne.lng },
-    { lat: OTHER_MAP_META.sw.lat, lng: OTHER_MAP_META.ne.lng },
+    OTHER_BBOX_SW,
+    midpoint(OTHER_BBOX_SW, OTHER_BBOX_NW),
+    OTHER_BBOX_NW,
+    OTHER_BBOX_NE,
+    midpoint(OTHER_BBOX_NE, OTHER_BBOX_SE),
+    OTHER_BBOX_SE,
   ];
 
   it('setMeasuredMapMeta re-initializes outlineCorners from the NEW bbox when the incoming mapMeta DIFFERS from the stored one and the corners were never adjusted (feedback round 6 fix)', () => {
@@ -603,6 +616,153 @@ describe('useBuild store: mapMeta / outlineCorners (feedback round 6)', () => {
     expect(s.address).toBe('42 Wallaby Way');
     expect(s.mapMeta).toBeNull();
     expect(s.outlineCorners).toBeNull();
+  });
+
+  // Feedback round 7 (Task C item 5): a pre-round-7 persisted store has
+  // only 4 outlineCorners (sw, nw, ne, se). Rehydrating that state must
+  // upgrade it to 6 points (inserting the two edge midpoints) rather than
+  // leaving a 4-point array around for code that now assumes 6, or crashing
+  // outright.
+  it('upgrades a pre-round-7 4-point persisted outlineCorners to 6 points on rehydrate', async () => {
+    const legacyFourCorners = [BBOX_SW, BBOX_NW, BBOX_NE, BBOX_SE];
+    const legacyBlob = JSON.stringify({
+      state: {
+        address: '1530 Main St, Sarasota, FL',
+        outlineSqft: 2150,
+        sq: sqFromOutline(2150),
+        outlineSource: 'adjusted',
+        mapMeta: MAP_META,
+        outlineCorners: legacyFourCorners,
+        shingle: null,
+        color: null,
+        underlayment: 'synthetic',
+        dripEdge: null,
+        accepted: false,
+        contact: null,
+        visit: null,
+      },
+      version: 0,
+    });
+
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlob);
+
+    await useBuild.persist.rehydrate();
+
+    const s = useBuild.getState();
+    // Upgraded to exactly the 6-point shape (sw, w-mid, nw, ne, e-mid, se)
+    // -- not left at 4, not dropped, not thrown.
+    expect(s.outlineCorners).toHaveLength(6);
+    expect(s.outlineCorners).toEqual(BBOX_CORNERS);
+    // Nothing else about the migration disturbs unrelated fields.
+    expect(s.address).toBe('1530 Main St, Sarasota, FL');
+    expect(s.outlineSqft).toBe(2150);
+  });
+
+  it('leaves an already-6-point persisted outlineCorners alone on rehydrate (no double-upgrade)', async () => {
+    const legacyBlob = JSON.stringify({
+      state: {
+        address: '1530 Main St, Sarasota, FL',
+        mapMeta: MAP_META,
+        outlineCorners: ADJUSTED_CORNERS,
+      },
+      version: 0,
+    });
+
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlob);
+
+    await useBuild.persist.rehydrate();
+
+    expect(useBuild.getState().outlineCorners).toEqual(ADJUSTED_CORNERS);
+  });
+
+  it('rehydrating with a null persisted outlineCorners does not crash and stays null', async () => {
+    const legacyBlob = JSON.stringify({
+      state: { address: '1530 Main St, Sarasota, FL', mapMeta: null, outlineCorners: null },
+      version: 0,
+    });
+
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlob);
+
+    await useBuild.persist.rehydrate();
+
+    expect(useBuild.getState().outlineCorners).toBeNull();
+  });
+
+  describe('setSeedOutline (feedback round 7, Task C item 2: the no-solar-data trace flow)', () => {
+    const SEED_CORNERS = [
+      { lat: 27.1, lng: -82.1 },
+      { lat: 27.10005, lng: -82.1 },
+      { lat: 27.1001, lng: -82.1 },
+      { lat: 27.1001, lng: -82.0999 },
+      { lat: 27.10005, lng: -82.0999 },
+      { lat: 27.1, lng: -82.0999 },
+    ];
+    const SEED_MAP_META = {
+      centerLat: 27.10005,
+      centerLng: -82.09995,
+      zoom: 20,
+      sw: { lat: 27.1, lng: -82.1 },
+      ne: { lat: 27.1001, lng: -82.0999 },
+      imgW: 1280,
+      imgH: 800,
+    };
+
+    it('sets mapMeta and outlineCorners directly from the given seed corners, not re-derived from the bbox', () => {
+      useBuild.getState().setSeedOutline(SEED_MAP_META, SEED_CORNERS);
+      const s = useBuild.getState();
+      expect(s.mapMeta).toEqual(SEED_MAP_META);
+      expect(s.outlineCorners).toEqual(SEED_CORNERS);
+    });
+
+    it('overwrites unconditionally, unlike setMeasuredMapMeta -- even an already-adjusted outline is replaced', () => {
+      useBuild.getState().setMeasuredMapMeta(MAP_META);
+      useBuild.getState().setOutlineAdjusted(2150, ADJUSTED_CORNERS);
+      expect(useBuild.getState().outlineSource).toBe('adjusted');
+
+      useBuild.getState().setSeedOutline(SEED_MAP_META, SEED_CORNERS);
+
+      const s = useBuild.getState();
+      expect(s.mapMeta).toEqual(SEED_MAP_META);
+      expect(s.outlineCorners).toEqual(SEED_CORNERS);
+    });
+  });
+});
+
+describe('adoptCanonicalAddress (feedback round 7, Task C item 1)', () => {
+  it('replaces the address text with the canonical formattedAddress, without touching placeId/outline/mapMeta/propertyImageUrl', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('8491 60th Street, Pinellas Park, FL, USA', 'places/abc123');
+    s0.setOutlineFromSatellite(1900);
+    s0.setPropertyImageUrl('https://example.com/aerial.png');
+
+    useBuild.getState().adoptCanonicalAddress('8491 60th St, Pinellas Park, FL 33781, USA');
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('8491 60th St, Pinellas Park, FL 33781, USA');
+    expect(s.placeId).toBe('places/abc123');
+    expect(s.outlineSqft).toBe(1900);
+    expect(s.propertyImageUrl).toBe('https://example.com/aerial.png');
+  });
+
+  it('is a no-op when the address already matches', () => {
+    useBuild.getState().setAddress('8491 60th St, Pinellas Park, FL 33781, USA');
+    setMeasurementAttempt({ address: '8491 60th St, Pinellas Park, FL 33781, USA', outcome: 'found', sqft: 1900 });
+
+    useBuild.getState().adoptCanonicalAddress('8491 60th St, Pinellas Park, FL 33781, USA');
+
+    // Untouched -- a genuine no-op, not just an equal string re-set.
+    expect(getMeasurementAttempt()).not.toBeNull();
+  });
+
+  it('is a no-op for an empty formattedAddress', () => {
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602');
+
+    useBuild.getState().adoptCanonicalAddress('');
+
+    expect(useBuild.getState().address).toBe('123 Palm Ave, Tampa, FL 33602');
   });
 });
 

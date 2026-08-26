@@ -29,5 +29,13 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::984950935097:role/chq-github-deploy
           aws-region: us-east-1
+      # Upload in cache-tiers, then one unfiltered pass to delete removed
+      # objects. Only content-hashed files under assets/ may be immutable;
+      # images keep their filenames across edits, so they get a short TTL.
+      # No --delete on the filtered passes: with --exclude, sync treats
+      # filtered-out files as absent from the source and would delete them.
+      - run: aws s3 sync app/web/dist s3://chq-site-984950935097 --exclude "*" --include "assets/*" --cache-control "public,max-age=31536000,immutable"
+      - run: aws s3 sync app/web/dist s3://chq-site-984950935097 --exclude "assets/*" --exclude "*.html" --exclude "robots.txt" --cache-control "public,max-age=3600"
+      - run: aws s3 sync app/web/dist s3://chq-site-984950935097 --exclude "*" --include "*.html" --include "robots.txt" --cache-control "no-cache"
       - run: aws s3 sync app/web/dist s3://chq-site-984950935097 --delete
       - run: aws cloudfront create-invalidation --distribution-id E2ORSMTHXNTZ5Y --paths "/*"

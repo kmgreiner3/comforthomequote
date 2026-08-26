@@ -67,7 +67,13 @@ export default function StepAddress({ onContinue }: { onContinue: () => void }) 
             placeholder="123 Palm Ave, Tampa, FL 33602"
             inputClassName="min-h-[44px] w-full rounded-xl border-2 border-navy-950/15 bg-white px-5 py-4 text-lg text-ink outline-none transition-colors focus:border-blue-600"
           />
-          {touched && !validation.ok && (
+          {/* A picked suggestion (placeId set) must never even FLASH the
+              format-validation error, even though it still submits fine --
+              `validation` is computed unconditionally above off `value`,
+              and a Google suggestion description can fail it (missing ZIP)
+              the same way a free-typed one can (feedback round 7, Task C
+              item 1). */}
+          {touched && !placeId && !validation.ok && (
             <p className="mt-2 text-sm text-red-600">{validation.error}</p>
           )}
           <p className="mt-2 text-sm text-ink/60">

@@ -3,6 +3,8 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { GetParameterCommand, ParameterNotFound, SSMClient } from '@aws-sdk/client-ssm';
 import {
   buildMapMeta,
+  buildSeedCorners,
+  buildSeedMapMeta,
   computeOverlayZoom,
   geocodeAddress,
   geocodeByPlaceId,
@@ -103,6 +105,26 @@ describe('geocodeAddress', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) }));
     const result = await geocodeAddress('nonsense address', 'fake-key');
     expect(result.found).toBe(false);
+  });
+
+  it('golden: returns formatted_address verbatim as formattedAddress, ZIP included (feedback round 7)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              formatted_address: '8491 60th Street, Pinellas Park, FL 33781, USA',
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 27.84, lng: -82.68 } },
+            },
+          ],
+        }),
+      }),
+    );
+    const result = await geocodeAddress('8491 60th Street, Pinellas Park, FL', 'fake-key');
+    expect(result.formattedAddress).toBe('8491 60th Street, Pinellas Park, FL 33781, USA');
   });
 });
 
@@ -348,6 +370,59 @@ describe('buildMapMeta', () => {
     expect(meta.ne).toEqual({ lat: BBOX_FIXTURE.ne.latitude, lng: BBOX_FIXTURE.ne.longitude });
     expect(meta.imgW).toBe(1280);
     expect(meta.imgH).toBe(800);
+  });
+});
+
+describe('buildSeedCorners', () => {
+  it('golden: six points centered on (lat, lng), in sw / w-mid / nw / ne / e-mid / se order, sized ~12m x 10m (~1,300 sqft)', () => {
+    const [sw, wMid, nw, ne, eMid, se] = buildSeedCorners(27, -82.46);
+
+    // West edge (sw -> nw) and east edge (ne -> se) each share a
+    // longitude; west is strictly less than east.
+    expect(sw!.lng).toBeCloseTo(nw!.lng, 9);
+    expect(ne!.lng).toBeCloseTo(se!.lng, 9);
+    expect(sw!.lng).toBeLessThan(ne!.lng);
+
+    // South edge (sw -> se) and north edge (nw -> ne) each share a
+    // latitude; south is strictly less than north.
+    expect(sw!.lat).toBeCloseTo(se!.lat, 9);
+    expect(nw!.lat).toBeCloseTo(ne!.lat, 9);
+    expect(sw!.lat).toBeLessThan(nw!.lat);
+
+    // The two mid points sit at the input latitude, on their own edge's
+    // longitude -- exactly the midpoint of the (longer) vertical edge
+    // they belong to.
+    expect(wMid).toEqual({ lat: 27, lng: sw!.lng });
+    expect(eMid).toEqual({ lat: 27, lng: ne!.lng });
+
+    // Centered on the input point.
+    expect((sw!.lat + nw!.lat) / 2).toBeCloseTo(27, 9);
+    expect((sw!.lng + ne!.lng) / 2).toBeCloseTo(-82.46, 9);
+
+    // ~12m north-south (the longer span) x ~10m east-west -> ~1,300 sqft.
+    const nsMeters = (nw!.lat - sw!.lat) * 111320;
+    const ewMeters = (ne!.lng - sw!.lng) * 111320 * Math.cos((27 * Math.PI) / 180);
+    expect(nsMeters).toBeCloseTo(12, 5);
+    expect(ewMeters).toBeCloseTo(10, 5);
+    expect(nsMeters * ewMeters * 10.7639104167).toBeCloseTo(1291.67, 0);
+  });
+});
+
+describe('buildSeedMapMeta', () => {
+  it('centers on the geocoded point at the max overlay zoom (20), matching the no-bbox Static Maps fallback', () => {
+    const meta = buildSeedMapMeta(27.95, -82.46);
+    expect(meta.centerLat).toBe(27.95);
+    expect(meta.centerLng).toBe(-82.46);
+    expect(meta.zoom).toBe(20);
+    expect(meta.imgW).toBe(1280);
+    expect(meta.imgH).toBe(800);
+  });
+
+  it("reports the seed rectangle's own outer corners as sw/ne (there is no real Solar bbox to frame)", () => {
+    const meta = buildSeedMapMeta(27, -82.46);
+    const [sw, , , ne] = buildSeedCorners(27, -82.46);
+    expect(meta.sw).toEqual({ lat: sw!.lat, lng: sw!.lng });
+    expect(meta.ne).toEqual({ lat: ne!.lat, lng: ne!.lng });
   });
 });
 

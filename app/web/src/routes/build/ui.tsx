@@ -100,6 +100,27 @@ export function PrimaryButton({
   );
 }
 
+/**
+ * Prominent bordered peer action (feedback round 7, Task C item 3): a
+ * heavier weight than SecondaryLinkButton's quiet pill, so "Adjust outline"
+ * on the confirm card reads as a real peer action next to "Looks right,
+ * continue" -- not an easily-missed ghost link (Kyle: outline adjustment
+ * needs to be noticeable). Solid navy border + text on white, the same
+ * pill shape and min-height as every other button here.
+ */
+export function ProminentSecondaryButton({
+  className = '',
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      className={`min-h-[44px] rounded-full border-2 border-navy-950 bg-white px-6 py-3 text-sm font-semibold text-navy-950 transition-colors duration-200 hover:bg-navy-950/5 ${className}`}
+      {...props}
+    />
+  );
+}
+
 export function SecondaryLinkButton({
   className = '',
   ...props

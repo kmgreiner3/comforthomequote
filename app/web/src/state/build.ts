@@ -15,16 +15,36 @@ import { clearMeasurementAttempt } from '../routes/build/measurementAttempt';
 import { clearNextStepFlags } from '../routes/next/useStepFlags';
 import type { LatLngCorner, MapMeta } from '../lib/mapMeta';
 
-// Rectangle corners in the same drawing order app/api's boundingBoxPathPoints
-// used to use (sw -> nw -> ne -> se), derived from a mapMeta's bounding box
-// -- the initial, unadjusted quad before any homeowner drag.
+function midpoint(a: LatLngCorner, b: LatLngCorner): LatLngCorner {
+  return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+}
+
+// Six points in the order the outline editor consumes (feedback round 7,
+// Task C item 4): sw -> w-mid -> nw -> ne -> e-mid -> se -- the 4 rectangle
+// corners (in the same order app/api's old boundingBoxPathPoints used,
+// sw -> nw -> ne -> se) plus the midpoints of the two longer west/east
+// edges, derived from a mapMeta's bounding box. This is the initial,
+// unadjusted hexagon before any homeowner drag.
 function cornersFromMapMeta(m: MapMeta): LatLngCorner[] {
-  return [
-    { lat: m.sw.lat, lng: m.sw.lng },
-    { lat: m.ne.lat, lng: m.sw.lng },
-    { lat: m.ne.lat, lng: m.ne.lng },
-    { lat: m.sw.lat, lng: m.ne.lng },
-  ];
+  const sw = { lat: m.sw.lat, lng: m.sw.lng };
+  const nw = { lat: m.ne.lat, lng: m.sw.lng };
+  const ne = { lat: m.ne.lat, lng: m.ne.lng };
+  const se = { lat: m.sw.lat, lng: m.ne.lng };
+  return [sw, midpoint(sw, nw), nw, ne, midpoint(ne, se), se];
+}
+
+// Upgrades a pre-round-7 persisted 4-point outlineCorners (sw, nw, ne, se)
+// to the current 6-point shape by inserting the two edge midpoints, so old
+// localStorage state rehydrates safely instead of crashing anything that
+// now expects 6 points. Anything that isn't exactly 4 (already 6, empty,
+// null, or some unexpected shape) is left untouched -- there's nothing
+// meaningful to upgrade, and every consumer already renders generically
+// over whatever length `outlineCorners` actually has.
+function upgradeOutlineCornersTo6(corners: unknown): unknown {
+  if (!Array.isArray(corners) || corners.length !== 4) return corners;
+  const [sw, nw, ne, se] = corners as LatLngCorner[];
+  if (!sw || !nw || !ne || !se) return corners;
+  return [sw, midpoint(sw, nw), nw, ne, midpoint(ne, se), se];
 }
 
 // Field-by-field (not JSON.stringify) so key order never matters.
@@ -80,8 +100,9 @@ export interface BuildState {
   // rather than the store having to know anything about expiry.
   propertyImageUrl: string | null;
   // The mapMeta the last successful /api/measure with a bounding box
-  // returned (Task A), and the 4 roof-outline corners (sw, nw, ne, se) it
-  // and any subsequent homeowner adjustment resolve to. Together these are
+  // returned (Task A), and the 6 roof-outline points (sw, w-mid, nw, ne,
+  // e-mid, se -- feedback round 7) it and any subsequent homeowner
+  // adjustment resolve to. Together these are
   // the single source of truth the confirm card's read-only overlay and the
   // adjust-outline editor's draggable one both render from (feedback round
   // 6) -- so the two can never show a different rectangle, and reopening
@@ -122,6 +143,15 @@ export interface BuildState {
   // addresses mid-flow (the address chip's "Change") keeps the rest of the
   // configuration intact for a fast side-by-side price check.
   setAddress(a: string, placeId?: string | null): void;
+  // Adopts the geocode's canonical formatted address (which always includes
+  // the postal code, unlike a Google suggestion description -- feedback
+  // round 7, Task C item 1) as the store's `address` once a measurement
+  // succeeds, WITHOUT touching placeId/outline/mapMeta/propertyImageUrl/the
+  // measurement-attempt cache -- unlike setAddress's "different address"
+  // branch, this is the SAME physical address, just its canonical text
+  // replacing whatever the homeowner typed or picked. A no-op if the text
+  // is empty or already matches.
+  adoptCanonicalAddress(formattedAddress: string): void;
   setOutline(sqft: number): void;
   setOutlineFromSatellite(sqft: number): void;
   // Homeowner-adjusted outline from the drag-to-fit roof editor (Task B
@@ -142,6 +172,13 @@ export interface BuildState {
   // frame, so they're kept rather than reset even across a re-measurement.
   // A null mapMeta clears both fields together.
   setMeasuredMapMeta(mapMeta: MapMeta | null): void;
+  // The no-solar-data trace flow's entry point (feedback round 7, Task C
+  // item 2): sets mapMeta AND outlineCorners directly from the response's
+  // own seedCorners, rather than re-deriving corners from the mapMeta's
+  // bbox the way setMeasuredMapMeta does -- there is no real Solar bounding
+  // box here, just the server's plausible starting rectangle, so the
+  // client trusts it verbatim instead of reconstructing it.
+  setSeedOutline(mapMeta: MapMeta, corners: LatLngCorner[]): void;
   setPropertyImageUrl(url: string | null): void;
   setShingle(k: ShingleKey): void;
   setColor(c: string): void;
@@ -231,6 +268,10 @@ export const useBuild = create<BuildState>()(
           outlineCorners: null,
         });
       },
+      adoptCanonicalAddress: (formattedAddress) => {
+        if (!formattedAddress || get().address === formattedAddress) return;
+        set({ address: formattedAddress });
+      },
       // Manual entry (StepHome's own footprint field). Always wins over a
       // prior satellite value -- entering/continuing here is the homeowner
       // overriding whatever satellite measurement (if any) came before.
@@ -266,6 +307,7 @@ export const useBuild = create<BuildState>()(
           outlineCorners: keepExistingCorners ? state.outlineCorners : cornersFromMapMeta(mapMeta),
         });
       },
+      setSeedOutline: (mapMeta, corners) => set({ mapMeta, outlineCorners: corners }),
       setPropertyImageUrl: (url) => set({ propertyImageUrl: url }),
       // Changing shingle resets color: the two products have different color
       // lists. Re-selecting the *same* shingle is a no-op -- it must not
@@ -291,11 +333,22 @@ export const useBuild = create<BuildState>()(
     {
       name: 'chq-build-v1',
       storage: createJSONStorage(() => localStorage),
-      // No explicit version/migrate: zustand's default merge is
-      // `{ ...currentState, ...persistedState }`. A field added later
-      // (outlineSource) simply isn't a key in older persisted JSON, so the
-      // spread leaves the freshly-initialized default (null) in place --
-      // old persisted state rehydrates safely without a migration step.
+      // A field added later (outlineSource, placeId, ...) simply isn't a
+      // key in older persisted JSON -- zustand's default merge,
+      // `{ ...currentState, ...persistedState }`, leaves the freshly-
+      // initialized default (null) in place for those, no migration step
+      // needed. version/migrate exist only for feedback round 7's
+      // outlineCorners shape change (4 points -> 6): that one DOES need an
+      // actual transform, not just "leave the default alone", since a
+      // pre-round-7 array is present but the WRONG shape.
+      version: 1,
+      migrate: (persistedState, version) => {
+        const state = persistedState as Record<string, unknown>;
+        if (version < 1 && state && typeof state === 'object' && 'outlineCorners' in state) {
+          state.outlineCorners = upgradeOutlineCornersTo6(state.outlineCorners);
+        }
+        return state;
+      },
     }
   )
 );

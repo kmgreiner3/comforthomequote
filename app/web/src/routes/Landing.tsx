@@ -99,7 +99,13 @@ export default function Landing() {
               Build My Roof
             </button>
           </form>
-          {touched && !validation.ok && (
+          {/* A picked suggestion (placeId set) must never even FLASH the
+              format-validation error, even though it still submits fine --
+              `validation` is computed unconditionally above off `value`,
+              and a Google suggestion description can fail it (missing ZIP)
+              the same way a free-typed one can (feedback round 7, Task C
+              item 1). */}
+          {touched && !placeId && !validation.ok && (
             <p className="mt-3 text-sm text-amber-400">{validation.error}</p>
           )}
           <p className="mt-3 text-sm text-sky-50/60">
