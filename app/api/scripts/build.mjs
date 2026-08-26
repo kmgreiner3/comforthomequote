@@ -2,7 +2,7 @@
 // infra stack (Task 2) can zip `dist/<name>/` directly for archive_file.
 import { build } from 'esbuild';
 
-const HANDLERS = ['measure', 'vizUpload', 'vizGenerate'];
+const HANDLERS = ['measure', 'vizUpload', 'vizGenerate', 'addressSuggest'];
 
 for (const name of HANDLERS) {
   await build({

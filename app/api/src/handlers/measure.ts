@@ -5,7 +5,14 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { clientIp, json, parseBody } from '../lib/http';
 import { checkAndIncrement, todayStamp } from '../lib/ratelimit';
 import type { BoundingBox } from '../lib/google';
-import { geocodeAddress, getGoogleApiKey, getGroundAreaSqft, getStaticMapPng } from '../lib/google';
+import {
+  buildMapMeta,
+  geocodeAddress,
+  geocodeByPlaceId,
+  getGoogleApiKey,
+  getGroundAreaSqft,
+  getStaticMapPng,
+} from '../lib/google';
 
 // Module-scope client so aws-sdk-client-mock's mockClient(S3Client)
 // intercepts every call regardless of which handler imports this module.
@@ -31,6 +38,14 @@ function normalizeAddress(address: string): string {
   return address.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// Cache identity for the property aerial image. A placeId is an opaque,
+// case-sensitive exact-match token (must NOT be case-folded the way a
+// free-typed address is); prefixed so it can never collide with a
+// normalized address string that happens to look the same.
+function imageCacheIdentity(address: string | undefined, placeId: string | undefined): string {
+  return placeId ? `placeid:${placeId}` : normalizeAddress(address!);
+}
+
 // v3: filenames now bake in the computed-zoom tight framing (see
 // staticMapUrl/computeOverlayZoom in google.ts) -- v2's auto-fit framed the
 // whole city grid around a small building instead of the roof itself.
@@ -39,8 +54,8 @@ function normalizeAddress(address: string): string {
 // objects age out on their own via the existing lifecycle rule (its
 // "maps/" prefix still covers "maps/v3/*"), and the measure Lambda's IAM
 // policy already scopes to "maps/*", which also still covers "maps/v3/*".
-function mapCacheKey(address: string): string {
-  const hash = createHash('sha256').update(normalizeAddress(address)).digest('hex');
+function mapCacheKey(identity: string): string {
+  const hash = createHash('sha256').update(identity).digest('hex');
   return `maps/v3/${hash}.png`;
 }
 
@@ -50,13 +65,13 @@ function mapCacheKey(address: string): string {
 // any failure here must not fail the measurement, so the caller simply gets
 // no imageUrl back.
 async function getPropertyImageUrl(
-  address: string,
+  identity: string,
   lat: number,
   lng: number,
   apiKey: string,
   boundingBox: BoundingBox | null,
 ): Promise<string | undefined> {
-  const key = mapCacheKey(address);
+  const key = mapCacheKey(identity);
   try {
     const cacheHit = await s3
       .send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }))
@@ -83,13 +98,15 @@ async function getPropertyImageUrl(
 
 interface MeasureBody {
   address?: string;
+  placeId?: string;
 }
 
 export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyStructuredResultV2> {
   const body = parseBody<MeasureBody>(event);
+  const placeId = body?.placeId?.trim();
   const address = body?.address?.trim();
-  if (!address) {
-    return json(400, { error: 'address is required' });
+  if (!placeId && !address) {
+    return json(400, { error: 'address or placeId is required' });
   }
 
   // Resolve the Google key before touching the rate limit: calls made while
@@ -106,7 +123,10 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return json(429, { error: 'rate limit exceeded' });
   }
 
-  const geocode = await geocodeAddress(address, apiKey);
+  // placeId (picked from an address-suggest suggestion) resolves via an
+  // exact-match geocode -- no ambiguity, unlike the free-typed address
+  // path, which is unchanged.
+  const geocode = placeId ? await geocodeByPlaceId(placeId, apiKey) : await geocodeAddress(address!, apiKey);
   if (!geocode.found) {
     return json(200, { found: false, reason: 'not-found' });
   }
@@ -123,7 +143,17 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return json(200, { found: false, reason: 'unlikely-roof-size' });
   }
 
-  const imageUrl = await getPropertyImageUrl(address, geocode.lat!, geocode.lng!, apiKey, boundingBox);
+  const identity = imageCacheIdentity(address, placeId);
+  const imageUrl = await getPropertyImageUrl(identity, geocode.lat!, geocode.lng!, apiKey, boundingBox);
+  // mapMeta only makes sense alongside an actual outline to adjust -- when
+  // Solar has ground area but no boundingBox (see getGroundAreaSqft), there
+  // is no rectangle drawn on the image either, so both are omitted together.
+  const mapMeta = boundingBox ? buildMapMeta(boundingBox) : undefined;
 
-  return json(200, { found: true, outlineSqft: sqft, ...(imageUrl ? { imageUrl } : {}) });
+  return json(200, {
+    found: true,
+    outlineSqft: sqft,
+    ...(imageUrl ? { imageUrl } : {}),
+    ...(mapMeta ? { mapMeta } : {}),
+  });
 }

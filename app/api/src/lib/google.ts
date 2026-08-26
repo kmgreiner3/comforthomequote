@@ -56,8 +56,7 @@ interface GoogleGeocodeResponse {
   }>;
 }
 
-export async function geocodeAddress(address: string, apiKey: string): Promise<GeocodeResult> {
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+async function fetchGeocode(url: string): Promise<GeocodeResult> {
   const res = await fetch(url);
   if (!res.ok) return { found: false };
   const data = (await res.json()) as GoogleGeocodeResponse;
@@ -72,6 +71,20 @@ export async function geocodeAddress(address: string, apiKey: string): Promise<G
     lng: result.geometry.location.lng,
     state: stateComponent?.short_name,
   };
+}
+
+export async function geocodeAddress(address: string, apiKey: string): Promise<GeocodeResult> {
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+  return fetchGeocode(url);
+}
+
+// Exact-match geocode by Places placeId -- used when the client picked a
+// suggestion from address-suggest, so there is no ambiguity to resolve
+// (unlike free-typed address strings, which Google's geocoder can match
+// fuzzily to the wrong property).
+export async function geocodeByPlaceId(placeId: string, apiKey: string): Promise<GeocodeResult> {
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?place_id=${encodeURIComponent(placeId)}&key=${apiKey}`;
+  return fetchGeocode(url);
 }
 
 export interface GoogleLatLng {
@@ -107,7 +120,12 @@ export interface SolarLookup {
 // area) plus the building's bounding box for the overlay, or null when
 // Solar has no data for the location.
 export async function getGroundAreaSqft(lat: number, lng: number, apiKey: string): Promise<SolarLookup | null> {
-  const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&key=${apiKey}`;
+  // requiredQuality=LOW: without it Solar defaults to HIGH-quality imagery
+  // only and 404s for buildings where only MEDIUM/LOW quality imagery has
+  // been processed -- the root cause of "falls to manual" misses on real
+  // (existing) homes. LOW asks for the best available imagery of ANY
+  // quality; higher-quality results still come back when they exist.
+  const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&requiredQuality=LOW&key=${apiKey}`;
   const res = await fetch(url);
   if (!res.ok) return null;
   const data = (await res.json()) as GoogleSolarResponse;
@@ -144,9 +162,11 @@ function boundingBoxPathPoints(box: BoundingBox): string[] {
 const METERS_PER_DEGREE_LAT = 111320;
 // Web Mercator meters-per-pixel at zoom 0, equator (256px tiles).
 const EARTH_MERIDIAN_CONSTANT = 156543.03392;
-// Static Maps image width in logical px (pre `scale=2` doubling) the
-// computed zoom must fit the padded bounding box span into.
+// Static Maps image size in logical px (pre `scale=2` doubling); the
+// computed zoom must fit the padded bounding box span into the width.
 const MAP_WIDTH_PX = 640;
+const MAP_HEIGHT_PX = 400;
+const STATIC_MAP_SCALE = 2;
 // Padding factor so the building doesn't fill the frame edge-to-edge.
 const FRAMING_PADDING = 1.5;
 const MIN_OVERLAY_ZOOM = 17;
@@ -185,20 +205,61 @@ export function computeOverlayZoom(box: BoundingBox): number {
   return Math.min(MAX_OVERLAY_ZOOM, Math.max(MIN_OVERLAY_ZOOM, z));
 }
 
+// Center + zoom for framing a bounding box on the static map -- the single
+// source of truth both staticMapUrl and buildMapMeta read from, so the
+// image the user sees and the mapMeta the overlay editor computes pixel
+// positions from can never drift apart.
+interface OverlayFraming {
+  center: GoogleLatLng;
+  zoom: number;
+}
+
+function overlayFraming(box: BoundingBox): OverlayFraming {
+  return { center: boundingBoxCenter(box), zoom: computeOverlayZoom(box) };
+}
+
 // Builds the Static Maps request URL. With a bounding box, centers on the
 // box's centroid at a computed tight-fit zoom and draws the measured
 // building as a polygon overlay. Without one, falls back to a plain
 // center/zoom satellite view with no overlay.
 function staticMapUrl(lat: number, lng: number, apiKey: string, boundingBox: BoundingBox | null | undefined): string {
   const base = 'https://maps.googleapis.com/maps/api/staticmap';
-  const common = 'size=640x400&scale=2&maptype=satellite';
+  const common = `size=${MAP_WIDTH_PX}x${MAP_HEIGHT_PX}&scale=${STATIC_MAP_SCALE}&maptype=satellite`;
   if (boundingBox) {
-    const center = boundingBoxCenter(boundingBox);
-    const zoom = computeOverlayZoom(boundingBox);
+    const { center, zoom } = overlayFraming(boundingBox);
     const path = `${OVERLAY_PATH_STYLE}|${boundingBoxPathPoints(boundingBox).join('|')}`;
     return `${base}?center=${center.latitude},${center.longitude}&zoom=${zoom}&path=${encodeURIComponent(path)}&${common}&key=${apiKey}`;
   }
   return `${base}?center=${lat},${lng}&zoom=20&${common}&key=${apiKey}`;
+}
+
+export interface MapMeta {
+  centerLat: number;
+  centerLng: number;
+  zoom: number;
+  sw: { lat: number; lng: number };
+  ne: { lat: number; lng: number };
+  imgW: number;
+  imgH: number;
+}
+
+// mapMeta for the adjustable-outline editor (Task B): the exact center,
+// zoom and image pixel dimensions the static map PNG was rendered with, so
+// the editor can convert the bounding box corners to pixel positions via
+// Web Mercator math that matches the image on screen. Derived from the same
+// overlayFraming() + size constants staticMapUrl() uses above -- never
+// compute these independently.
+export function buildMapMeta(box: BoundingBox): MapMeta {
+  const { center, zoom } = overlayFraming(box);
+  return {
+    centerLat: center.latitude,
+    centerLng: center.longitude,
+    zoom,
+    sw: { lat: box.sw.latitude, lng: box.sw.longitude },
+    ne: { lat: box.ne.latitude, lng: box.ne.longitude },
+    imgW: MAP_WIDTH_PX * STATIC_MAP_SCALE,
+    imgH: MAP_HEIGHT_PX * STATIC_MAP_SCALE,
+  };
 }
 
 // Fetches a satellite Static Maps PNG for the given point, optionally
@@ -220,5 +281,70 @@ export async function getStaticMapPng(
     return Buffer.from(bytes);
   } catch {
     return null;
+  }
+}
+
+// --- Places Autocomplete (New), server-side proxy for /api/address-suggest ---
+
+export interface AddressSuggestion {
+  description: string;
+  placeId: string;
+}
+
+// Global Constraints: results filtered to Florida; description contains
+// ", FL" for any real Florida street address Google returns.
+const FLORIDA_DESCRIPTION_MARKER = ', FL';
+const MAX_ADDRESS_SUGGESTIONS = 5;
+const AUTOCOMPLETE_TIMEOUT_MS = 3000;
+
+interface PlacesAutocompleteResponse {
+  suggestions?: Array<{
+    placePrediction?: {
+      placeId?: string;
+      text?: { text?: string };
+    };
+  }>;
+}
+
+// Proxies Places Autocomplete (New) so the Google key never reaches the
+// client. Returns null on ANY non-200 (including 403 when Places API (New)
+// is not yet enabled on the key), network failure, or a fetch that doesn't
+// resolve within AUTOCOMPLETE_TIMEOUT_MS -- callers turn that into
+// {available:false} rather than throwing. A successful call with no
+// Florida-matching predictions returns an empty array, not null.
+export async function suggestAddresses(
+  input: string,
+  sessionToken: string | undefined,
+  apiKey: string,
+): Promise<AddressSuggestion[] | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AUTOCOMPLETE_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+      },
+      body: JSON.stringify({ input, sessionToken, includedRegionCodes: ['us'] }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as PlacesAutocompleteResponse;
+    const suggestions: AddressSuggestion[] = [];
+    for (const item of data.suggestions ?? []) {
+      const description = item.placePrediction?.text?.text;
+      const placeId = item.placePrediction?.placeId;
+      if (!description || !placeId) continue;
+      if (!description.includes(FLORIDA_DESCRIPTION_MARKER)) continue;
+      suggestions.push({ description, placeId });
+      if (suggestions.length >= MAX_ADDRESS_SUGGESTIONS) break;
+    }
+    return suggestions;
+  } catch {
+    // Covers network failure and the AbortController timeout firing.
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }

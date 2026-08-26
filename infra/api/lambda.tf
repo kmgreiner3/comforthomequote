@@ -19,6 +19,12 @@ data "archive_file" "viz_generate" {
   output_path = "${path.module}/build/vizGenerate.zip"
 }
 
+data "archive_file" "address_suggest" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../app/api/dist/addressSuggest"
+  output_path = "${path.module}/build/addressSuggest.zip"
+}
+
 # --- IAM: one role per function, least privilege -------------------------
 
 data "aws_iam_policy_document" "lambda_assume" {
@@ -142,6 +148,39 @@ resource "aws_iam_role_policy" "viz_generate" {
   policy = data.aws_iam_policy_document.viz_generate.json
 }
 
+# address-suggest: reads the Google API key param, writes rate-limit
+# counters. Same shape as measure's role minus the S3 image-cache grant --
+# this handler never touches S3.
+
+resource "aws_iam_role" "address_suggest" {
+  name               = "chq-address-suggest-lambda"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "address_suggest_basic" {
+  role       = aws_iam_role.address_suggest.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "address_suggest" {
+  statement {
+    sid       = "ReadGoogleApiKey"
+    actions   = ["ssm:GetParameter"]
+    resources = [aws_ssm_parameter.google_api_key.arn]
+  }
+  statement {
+    sid       = "RateLimitCounters"
+    actions   = ["dynamodb:UpdateItem"]
+    resources = [aws_dynamodb_table.api.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "address_suggest" {
+  name   = "chq-address-suggest"
+  role   = aws_iam_role.address_suggest.id
+  policy = data.aws_iam_policy_document.address_suggest.json
+}
+
 # --- Lambda functions -----------------------------------------------------
 
 resource "aws_lambda_function" "measure" {
@@ -200,6 +239,27 @@ resource "aws_lambda_function" "viz_generate" {
       BUCKET   = aws_s3_bucket.visualizer.bucket
       TABLE    = aws_dynamodb_table.api.name
       MODEL_ID = "amazon.nova-canvas-v1:0"
+    }
+  }
+}
+
+resource "aws_lambda_function" "address_suggest" {
+  function_name = "chq-address-suggest"
+  role          = aws_iam_role.address_suggest.arn
+  handler       = "index.handler"
+  runtime       = "nodejs22.x"
+  memory_size   = 512
+  # The Places Autocomplete fetch itself times out at 3s (see
+  # AUTOCOMPLETE_TIMEOUT_MS in lib/google.ts); this leaves headroom for the
+  # SSM/DynamoDB round trips around it.
+  timeout          = 8
+  filename         = data.archive_file.address_suggest.output_path
+  source_code_hash = data.archive_file.address_suggest.output_base64sha256
+
+  environment {
+    variables = {
+      TABLE            = aws_dynamodb_table.api.name
+      GOOGLE_KEY_PARAM = aws_ssm_parameter.google_api_key.name
     }
   }
 }

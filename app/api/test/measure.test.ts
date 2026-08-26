@@ -39,6 +39,14 @@ function eventFor(address: string | undefined, ip = '203.0.113.5'): APIGatewayPr
   } as unknown as APIGatewayProxyEventV2;
 }
 
+function eventForBody(body: Record<string, unknown>, ip = '203.0.113.5'): APIGatewayProxyEventV2 {
+  return {
+    headers: { 'x-forwarded-for': `${ip}, 10.0.0.1` },
+    body: JSON.stringify(body),
+    isBase64Encoded: false,
+  } as unknown as APIGatewayProxyEventV2;
+}
+
 const BBOX_FIXTURE = {
   sw: { latitude: 27.949, longitude: -82.461 },
   ne: { latitude: 27.951, longitude: -82.459 },
@@ -80,7 +88,7 @@ beforeEach(() => {
 });
 
 describe('measure handler', () => {
-  it('400s when address is missing', async () => {
+  it('400s when both address and placeId are missing', async () => {
     const res = await handler(eventFor(undefined));
     expect(res.statusCode).toBe(400);
   });
@@ -143,6 +151,110 @@ describe('measure handler', () => {
     ddbMock.on(UpdateItemCommand).resolves({ Attributes: { count: { N: '21' } } });
     const res = await handler(eventFor('123 Main St, Tampa, FL'));
     expect(res.statusCode).toBe(429);
+  });
+});
+
+describe('measure handler placeId path', () => {
+  it('golden: geocodes by place_id (exact match) instead of address when placeId is present', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    const fetchMock = flFixture(150);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventForBody({ placeId: 'ChIJ_fake_place_id' }));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(true);
+    const geocodeUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(geocodeUrl.searchParams.get('place_id')).toBe('ChIJ_fake_place_id');
+    expect(geocodeUrl.searchParams.has('address')).toBe(false);
+  });
+
+  it('applies the same FL filter and rate limit as the address path', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              address_components: [{ short_name: 'GA', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 33.75, lng: -84.39 } },
+            },
+          ],
+        }),
+      }),
+    );
+    const res = await handler(eventForBody({ placeId: 'ChIJ_ga_place' }));
+    expect(JSON.parse(res.body as string)).toEqual({ found: false, reason: 'outside-florida' });
+  });
+});
+
+describe('measure handler mapMeta', () => {
+  const ADDRESS = '123 Main St, Tampa, FL';
+
+  it('golden: found:true includes mapMeta consistent with the bounding box (single source of truth with the image)', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+              geometry: { location: { lat: 27.95, lng: -82.46 } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ boundingBox: BBOX_FIXTURE, solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } } }),
+      })
+      .mockResolvedValueOnce(pngResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(true);
+    expect(parsed.mapMeta).toEqual({
+      centerLat: 27.950000000000003,
+      centerLng: -82.46000000000001,
+      zoom: 18,
+      sw: { lat: BBOX_FIXTURE.sw.latitude, lng: BBOX_FIXTURE.sw.longitude },
+      ne: { lat: BBOX_FIXTURE.ne.latitude, lng: BBOX_FIXTURE.ne.longitude },
+      imgW: 1280,
+      imgH: 800,
+    });
+    // Consistency check against the actual Static Maps URL built for the
+    // same request (fetch call index 2, after geocode + solar).
+    const mapUrl = new URL(fetchMock.mock.calls[2]![0] as string);
+    expect(String(parsed.mapMeta.zoom)).toBe(mapUrl.searchParams.get('zoom'));
+    expect(`${parsed.mapMeta.centerLat},${parsed.mapMeta.centerLng}`).toBe(mapUrl.searchParams.get('center'));
+  });
+
+  it('omits mapMeta when Solar has ground area but no boundingBox (no rectangle to adjust)', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    vi.stubGlobal('fetch', flFixture(150, null));
+
+    const res = await handler(eventFor(ADDRESS));
+    const parsed = JSON.parse(res.body as string);
+
+    expect(parsed.found).toBe(true);
+    expect(parsed).not.toHaveProperty('mapMeta');
+  });
+
+  it('never leaks the Google API key via mapMeta or anywhere else in the response', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'super-secret-google-key' } });
+    vi.stubGlobal('fetch', flFixture(150));
+
+    const res = await handler(eventFor(ADDRESS));
+
+    expect(res.body as string).not.toContain('super-secret-google-key');
   });
 });
 
