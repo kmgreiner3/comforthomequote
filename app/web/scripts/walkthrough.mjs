@@ -38,12 +38,25 @@
 //   5. On fresh contexts (per width), loads /metal; on the 1280 pass, opens
 //      the Lightbox on flyer-1, screenshots it, closes it via Escape, and
 //      asserts body scroll (locked while the Lightbox is open) is restored.
+//   6. Feedback round 5 (Task B): the address step's autocomplete combobox
+//      degrades silently to a plain input in preview (no live
+//      /api/address-suggest) -- asserted on both the mobile fill and the
+//      1280 fresh-load pass (no dropdown ever renders, no console/page
+//      error). The address chip (current address + "Change") is asserted
+//      visible on the home and shingle steps. Since preview also has no
+//      live /api/measure, the satellite confirm card (amber accuracy
+//      notice, "Adjust outline") is otherwise unreachable -- a dedicated
+//      fresh-context check mocks /api/measure (found:true + mapMeta) at
+//      both widths to screenshot it directly. The adjustable roof-outline
+//      editor itself is covered by RoofOutlineEditor's own component tests
+//      (pointer-event drag simulation), not here.
 //
 // Screenshots every /build step at 390x844 and 1280x800 (plus one extra:
-// the shingle step mid-selection on mobile), every /next step at both
-// widths (plus the partner step's documents section separately at both
-// widths), the landing/about pages at both widths, and the /metal page at
-// both widths (plus the open lightbox at 1280x800), all into
+// the shingle step mid-selection on mobile, and the mocked satellite
+// confirm card with the amber notice at both widths), every /next step at
+// both widths (plus the partner step's documents section separately at
+// both widths), the landing/about pages at both widths, and the /metal
+// page at both widths (plus the open lightbox at 1280x800), all into
 // .superpowers/sdd/screens/.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -225,6 +238,37 @@ async function assertNoMeasurementErrorUI(page, label) {
   console.log(`  [${label}] no measurement error/loading UI visible; manual form present`);
 }
 
+// Feedback round 5: preview has no live /api/address-suggest either (same
+// as /api/measure above) -- AddressCombobox must degrade silently to a
+// plain, fully usable text input with no dropdown ever rendered and no
+// console/page error surfaced, exactly like StepHome's satellite fallback
+// above.
+async function assertNoAddressDropdownError(page, label) {
+  const listboxCount = await page.locator('[role="listbox"]').count();
+  if (listboxCount !== 0) {
+    fail(`[${label}] expected no address suggestion dropdown (preview has no live suggest API), found one`);
+  }
+  console.log(`  [${label}] no address dropdown rendered (degraded silently, as expected in preview)`);
+}
+
+function assertNoConsoleErrors(consoleErrors, label) {
+  if (consoleErrors.length > 0) {
+    fail(`[${label}] unexpected console/page error(s):\n${consoleErrors.join('\n')}`);
+  }
+}
+
+// Feedback round 5: the compact address chip (current address + "Change")
+// must be visible under the step rail on every /build step past address.
+async function assertAddressChip(page, label, expectedAddress) {
+  const chip = page.locator('[data-testid="address-chip"]');
+  await chip.waitFor({ timeout: 2000 });
+  const text = await chip.innerText();
+  if (!text.includes(expectedAddress)) {
+    fail(`[${label}] expected the address chip to show "${expectedAddress}", got "${text}"`);
+  }
+  console.log(`  [${label}] address chip visible with "${expectedAddress}"`);
+}
+
 async function assertReviewPrice(page, label) {
   const bodyText = await page.locator('body').innerText();
   if (!bodyText.includes('$14,400')) {
@@ -378,6 +422,72 @@ async function checkMetal(browser, width, height) {
   await context.close();
 }
 
+// 1x1 transparent PNG, used to fulfill the mocked aerial-image request
+// below without any real network egress.
+const BLANK_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+// Feedback round 5, Task B item 2/4: preview has no live /api/measure, so
+// the main happy-path walk above only ever exercises the manual-fallback
+// form -- the satellite confirm card (amber accuracy notice, "Adjust
+// outline" entry point) is otherwise unreachable in this environment.
+// Mocks /api/measure with a `found:true` response (mapMeta + imageUrl
+// included) on a fresh, isolated context so that card can actually be
+// screenshotted, at both widths.
+async function checkSatelliteConfirmAmberNotice(browser, width, height) {
+  const context = await browser.newContext({ viewport: { width, height } });
+  const page = await context.newPage();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+
+  const mockImageUrl = `${BASE_URL}/mock-aerial.png`;
+  await page.route('**/mock-aerial.png', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(BLANK_PNG_BASE64, 'base64') })
+  );
+  await page.route('**/api/measure', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        found: true,
+        outlineSqft: 2308.32,
+        imageUrl: mockImageUrl,
+        mapMeta: {
+          centerLat: 27.336230049999998,
+          centerLng: -82.539976,
+          zoom: 20,
+          sw: { lat: 27.3360897, lng: -82.5400199 },
+          ne: { lat: 27.3363704, lng: -82.5399321 },
+          imgW: 1280,
+          imgH: 800,
+        },
+      }),
+    })
+  );
+
+  await page.goto(`${BASE_URL}/build`);
+  await waitForStep(page, 'address');
+  await page.getByLabel('Property address').fill('1530 Main St, Sarasota, FL 34236');
+  await page.getByRole('button', { name: 'Build My Roof' }).click();
+
+  await waitForStep(page, 'home');
+  await page.getByText('We found your roof.').waitFor({ timeout: 5000 });
+
+  const amberNotice = page.getByText(
+    'The automated measurement may not be exact. A licensed professional reviews every roof and makes any needed adjustments before final pricing.'
+  );
+  await amberNotice.waitFor({ timeout: 2000 });
+  await page.getByRole('button', { name: 'Adjust outline' }).waitFor({ timeout: 2000 });
+  console.log(`  [satellite confirm @ ${width}x${height}] amber accuracy notice + Adjust outline both visible`);
+
+  // The mocked aerial image pushes the notice below the fold on shorter
+  // viewports -- scroll it into view so the screenshot actually shows the
+  // thing it exists to capture, not just the image above it.
+  await amberNotice.scrollIntoViewIfNeeded();
+  await screenshotNamed(page, 'home-confirm-amber', width);
+
+  await context.close();
+}
+
 async function main() {
   fs.mkdirSync(SCREENS_DIR, { recursive: true });
 
@@ -412,6 +522,24 @@ async function main() {
     // under prefers-reduced-motion instead of mid-transition/mid-stagger).
     await page.emulateMedia({ reducedMotion: 'reduce' });
 
+    // Feedback round 5: preview has no live /api/address-suggest, so the
+    // combobox's fetch will fail/404 on every keystroke past 4 chars --
+    // track console/page errors so a regression that surfaces as a thrown
+    // JS error (rather than being silently swallowed, as the combobox's
+    // own catch block is supposed to do) actually fails the run. The
+    // browser itself always logs a "Failed to load resource: 404" console
+    // error for the failed /api/address-suggest (and /api/measure) network
+    // request regardless of whether application code handled it -- that's
+    // expected noise here, not a bug, so it's filtered out rather than
+    // treated as a failure.
+    const consoleErrors = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error' && !/Failed to load resource/.test(msg.text())) {
+        consoleErrors.push(msg.text());
+      }
+    });
+    page.on('pageerror', (err) => consoleErrors.push(String(err)));
+
     await page.goto(`${BASE_URL}/build`);
     await page.evaluate(() => window.localStorage.clear());
     await page.goto(`${BASE_URL}/build`);
@@ -422,12 +550,20 @@ async function main() {
     await waitForStep(page, 'address');
     await assertColdLoadTop(page, '390 mobile pass: bare /build cold load');
     await assertNoPriceHero(page, '390 address');
-    await screenshotStep(page, STEPS[0], 390);
     await page.getByLabel('Property address').fill('123 Palm Ave, Tampa, FL 33602');
+    // Debounce (250ms) + a failed fetch round-trip to a domain with no live
+    // suggest API -- give it time to settle before asserting the dropdown
+    // never appeared, then screenshot the address step with the address
+    // filled in and the plain-input degrade path confirmed.
+    await page.waitForTimeout(600);
+    await assertNoAddressDropdownError(page, '390 address');
+    assertNoConsoleErrors(consoleErrors, '390 address');
+    await screenshotStep(page, STEPS[0], 390);
     await page.getByRole('button', { name: 'Build My Roof' }).click();
 
     await waitForStep(page, 'home');
     await assertNoPriceHero(page, '390 home');
+    await assertAddressChip(page, '390 home', '123 Palm Ave, Tampa, FL 33602');
     await assertNoMeasurementErrorUI(page, '390 home');
     await page.getByLabel('Home footprint (sq ft)').fill('2000');
     await page.getByText("Got it. We've sized your roof.").waitFor();
@@ -440,6 +576,7 @@ async function main() {
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await waitForStep(page, 'shingle');
+    await assertAddressChip(page, '390 shingle', '123 Palm Ave, Tampa, FL 33602');
     await screenshotStep(page, STEPS[2], 390);
     const titanCard = page.getByText('TAMKO Titan XT');
     await titanCard.click();
@@ -502,6 +639,16 @@ async function main() {
       await waitForStep(page, step.id);
       if (step.id === 'address') {
         await assertColdLoadTop(page, '1280 desktop pass: fresh #address load');
+        // Prefilled from localStorage on this fresh load -- the combobox's
+        // fetch effect fires on mount too; let its (failed, no live suggest
+        // API in preview) round-trip settle before screenshotting so the
+        // capture reliably shows the closed, plain-input degrade state.
+        await page.waitForTimeout(600);
+        await assertNoAddressDropdownError(page, '1280 address');
+        assertNoConsoleErrors(consoleErrors, '1280 address');
+      }
+      if (step.id === 'shingle') {
+        await assertAddressChip(page, '1280 shingle', '123 Palm Ave, Tampa, FL 33602');
       }
       await screenshotStep(page, step, 1280);
     }
@@ -591,6 +738,13 @@ async function main() {
     console.log('\nMetal & Tile: /metal screenshots + Lightbox open/close check...');
     await checkMetal(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
     await checkMetal(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
+
+    // --- Satellite confirm card (amber accuracy notice + "Adjust outline"):
+    //     fresh contexts with /api/measure mocked, both widths -- otherwise
+    //     unreachable in preview, which has no live measure API. ---
+    console.log('\nSatellite confirm card: amber notice + Adjust outline (mocked /api/measure)...');
+    await checkSatelliteConfirmAmberNotice(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
+    await checkSatelliteConfirmAmberNotice(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
     await browser.close();
     console.log('\nAll assertions passed. Walkthrough complete.');

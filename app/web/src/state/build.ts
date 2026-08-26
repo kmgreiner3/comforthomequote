@@ -29,10 +29,16 @@ export interface Visit {
   window: 'Morning' | 'Afternoon' | 'No Preference';
 }
 
-export type OutlineSource = 'satellite' | 'manual' | null;
+export type OutlineSource = 'satellite' | 'manual' | 'adjusted' | null;
 
 export interface BuildState {
   address: string | null;
+  // Google Places placeId for `address`, when it was picked from the
+  // address-suggest dropdown rather than free-typed. Sent alongside address
+  // on /api/measure (exact-match geocode, no ambiguity); null for a
+  // free-typed address, and always cleared whenever address changes to a
+  // different value that wasn't itself accompanied by a placeId.
+  placeId: string | null;
   outlineSqft: number | null;
   sq: number | null; // sqFromOutline(outlineSqft), set together
   // How outlineSqft/sq were populated. Never rendered to the homeowner --
@@ -54,9 +60,26 @@ export interface BuildState {
   visit: Visit | null;
 
   // actions
-  setAddress(a: string): void;
+  // `placeId`: pass the picked suggestion's placeId when `a` came from the
+  // address-suggest dropdown, omit/null for a free-typed address. Setting
+  // the SAME address (string equality against the current value) is a
+  // no-op -- nothing is cleared, nothing is rewritten. Setting a DIFFERENT
+  // address clears outline/sq/outlineSource/propertyImageUrl (the prior
+  // measurement no longer applies to a different property) and the
+  // measurement-attempt cache, but deliberately leaves shingle/color/
+  // underlayment/dripEdge/accepted/contact/visit untouched so switching
+  // addresses mid-flow (the address chip's "Change") keeps the rest of the
+  // configuration intact for a fast side-by-side price check.
+  setAddress(a: string, placeId?: string | null): void;
   setOutline(sqft: number): void;
   setOutlineFromSatellite(sqft: number): void;
+  // Homeowner-adjusted outline from the drag-to-fit roof editor (Task B
+  // item 4). Same sqFromOutline derivation as the other two outline
+  // setters, distinct provenance tag ('adjusted') so a later back-
+  // navigation's satellite-number leak guard also applies to this value
+  // (it's still an image-derived measurement, just user-refined -- not a
+  // hand-typed footprint).
+  setOutlineAdjusted(sqft: number): void;
   setPropertyImageUrl(url: string | null): void;
   setShingle(k: ShingleKey): void;
   setColor(c: string): void;
@@ -79,6 +102,7 @@ export interface BuildState {
 type PersistedFields = Pick<
   BuildState,
   | 'address'
+  | 'placeId'
   | 'outlineSqft'
   | 'sq'
   | 'outlineSource'
@@ -94,6 +118,7 @@ type PersistedFields = Pick<
 
 const initialState: PersistedFields = {
   address: null,
+  placeId: null,
   outlineSqft: null,
   sq: null,
   outlineSource: null,
@@ -112,7 +137,18 @@ export const useBuild = create<BuildState>()(
     (set, get) => ({
       ...initialState,
 
-      setAddress: (a) => set({ address: a }),
+      setAddress: (a, placeId) => {
+        if (get().address === a) return; // same address: no-op, nothing to clear/rewrite
+        clearMeasurementAttempt();
+        set({
+          address: a,
+          placeId: placeId ?? null,
+          outlineSqft: null,
+          sq: null,
+          outlineSource: null,
+          propertyImageUrl: null,
+        });
+      },
       // Manual entry (StepHome's own footprint field). Always wins over a
       // prior satellite value -- entering/continuing here is the homeowner
       // overriding whatever satellite measurement (if any) came before.
@@ -122,6 +158,11 @@ export const useBuild = create<BuildState>()(
       // provenance tag only.
       setOutlineFromSatellite: (sqft) =>
         set({ outlineSqft: sqft, sq: sqFromOutline(sqft), outlineSource: 'satellite' }),
+      // Homeowner dragged the roof-outline editor's corners to a better fit
+      // and confirmed it via "Use this outline". Same derivation, distinct
+      // provenance tag.
+      setOutlineAdjusted: (sqft) =>
+        set({ outlineSqft: sqft, sq: sqFromOutline(sqft), outlineSource: 'adjusted' }),
       setPropertyImageUrl: (url) => set({ propertyImageUrl: url }),
       // Changing shingle resets color: the two products have different color
       // lists. Re-selecting the *same* shingle is a no-op -- it must not

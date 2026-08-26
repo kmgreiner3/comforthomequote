@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useBuild } from '../../state/build';
-import { BackChevron, CheckMark, PrimaryButton, StepHeading } from './ui';
+import { AccuracyNotice, BackChevron, CheckMark, PrimaryButton, SecondaryLinkButton, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
 import { getMeasurementAttempt, setMeasurementAttempt } from './measurementAttempt';
 import { formatFootprintSqft } from '../../lib/format';
+import { isMapMeta, type MapMeta } from '../../lib/mapMeta';
+import RoofOutlineEditor from './RoofOutlineEditor';
 
 const MIN_SQFT = 500;
 const MAX_SQFT = 15000;
@@ -13,7 +15,14 @@ const MEASURE_TIMEOUT_MS = 8000;
 
 type Phase =
   | { kind: 'loading' }
-  | { kind: 'confirm'; sqft: number; imageUrl?: string }
+  // `adjusted`: whether this sqft has already been committed to the store
+  // via setOutlineAdjusted (true, from the outline editor's "Use this
+  // outline") vs. still-unconfirmed fresh satellite output (false) that
+  // "Looks right, continue" still needs to commit via setOutlineFromSatellite.
+  | { kind: 'confirm'; sqft: number; imageUrl?: string; mapMeta?: MapMeta; adjusted: boolean }
+  // Entered via "Adjust outline"; sqft/adjusted here are what Cancel
+  // reverts to (the confirm phase's own state at the moment of entry).
+  | { kind: 'editor'; sqft: number; imageUrl: string; mapMeta: MapMeta; adjusted: boolean }
   | { kind: 'form' }
   | { kind: 'outside-florida' };
 
@@ -24,12 +33,15 @@ type Phase =
 // still never be rendered. `sqft` is passed to formatFootprintSqft() for
 // display and to setOutlineFromSatellite() for the store; the store always
 // keeps the exact, unrounded value for pricing.
-function isFoundResponse(data: unknown): data is { found: true; outlineSqft: number; imageUrl?: string } {
+function isFoundResponse(
+  data: unknown
+): data is { found: true; outlineSqft: number; imageUrl?: string; mapMeta?: MapMeta } {
   if (!data || typeof data !== 'object') return false;
   const d = data as Record<string, unknown>;
   if (d.found !== true) return false;
   if (typeof d.outlineSqft !== 'number' || !Number.isFinite(d.outlineSqft)) return false;
   if (d.imageUrl !== undefined && typeof d.imageUrl !== 'string') return false;
+  if (d.mapMeta !== undefined && !isMapMeta(d.mapMeta)) return false;
   return true;
 }
 
@@ -60,7 +72,13 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
   const attempt = getMeasurementAttempt();
   if (attempt && attempt.address === address) {
     if (attempt.outcome === 'found') {
-      return { kind: 'confirm', sqft: attempt.sqft, imageUrl: attempt.imageUrl };
+      return {
+        kind: 'confirm',
+        sqft: attempt.sqft,
+        imageUrl: attempt.imageUrl,
+        mapMeta: attempt.mapMeta,
+        adjusted: false,
+      };
     }
     if (attempt.outcome === 'outside-florida') {
       return { kind: 'outside-florida' };
@@ -73,17 +91,21 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
 export default function StepHome({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const setOutline = useBuild((s) => s.setOutline);
   const setOutlineFromSatellite = useBuild((s) => s.setOutlineFromSatellite);
+  const setOutlineAdjusted = useBuild((s) => s.setOutlineAdjusted);
   const setPropertyImageUrl = useBuild((s) => s.setPropertyImageUrl);
   const propertyImageUrl = useBuild((s) => s.propertyImageUrl);
   const savedOutline = useBuild((s) => s.outlineSqft);
   const outlineSource = useBuild((s) => s.outlineSource);
   const address = useBuild((s) => s.address);
+  const placeId = useBuild((s) => s.placeId);
 
-  // Client pricing-display rule extends here: a satellite-sourced outline
-  // must never leak into the DOM, including as a prefilled input value on
-  // back-navigation. Manual-sourced saved values may still prefill.
+  // Client pricing-display rule extends here: a satellite-sourced OR
+  // homeowner-adjusted outline must never leak into the DOM, including as
+  // a prefilled input value on back-navigation -- both are image-derived
+  // measurements, not a hand-typed footprint. Only a manual-sourced saved
+  // value may still prefill.
   const [value, setValue] = useState(
-    savedOutline != null && outlineSource !== 'satellite' ? String(savedOutline) : ''
+    savedOutline != null && outlineSource === 'manual' ? String(savedOutline) : ''
   );
   const [phase, setPhase] = useState<Phase>(() => initialPhase(address, savedOutline));
   // A presigned imageUrl can go stale (1h expiry) or the image can simply
@@ -122,7 +144,7 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     fetch('/api/measure', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address }),
+      body: JSON.stringify({ address, ...(placeId ? { placeId } : {}) }),
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -144,8 +166,15 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
             outcome: 'found',
             sqft: data.outlineSqft,
             ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
+            ...(data.mapMeta ? { mapMeta: data.mapMeta } : {}),
           });
-          setPhase({ kind: 'confirm', sqft: data.outlineSqft, imageUrl: data.imageUrl });
+          setPhase({
+            kind: 'confirm',
+            sqft: data.outlineSqft,
+            imageUrl: data.imageUrl,
+            mapMeta: data.mapMeta,
+            adjusted: false,
+          });
         } else if (isOutsideFloridaResponse(data)) {
           setMeasurementAttempt({ address: address as string, outcome: 'outside-florida' });
           setPhase({ kind: 'outside-florida' });
@@ -181,8 +210,12 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     onContinue();
   }
 
-  function handleConfirmSatellite(sqft: number) {
-    setOutlineFromSatellite(sqft);
+  function handleConfirmSatellite(sqft: number, adjusted: boolean) {
+    // If the outline was already adjusted via the editor, setOutlineAdjusted
+    // already committed it to the store at that moment -- committing again
+    // here via setOutlineFromSatellite would wrongly overwrite
+    // outlineSource back to 'satellite'.
+    if (!adjusted) setOutlineFromSatellite(sqft);
     onContinue();
   }
 
@@ -190,6 +223,22 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     // No image on the manual path.
     setPropertyImageUrl(null);
     setPhase({ kind: 'form' });
+  }
+
+  function handleAdjustOutline() {
+    if (phase.kind !== 'confirm' || !phase.mapMeta || !phase.imageUrl || imgFailed) return;
+    setPhase({ kind: 'editor', sqft: phase.sqft, imageUrl: phase.imageUrl, mapMeta: phase.mapMeta, adjusted: phase.adjusted });
+  }
+
+  function handleApplyAdjustedOutline(sqft: number) {
+    if (phase.kind !== 'editor') return;
+    setOutlineAdjusted(sqft);
+    setPhase({ kind: 'confirm', sqft, imageUrl: phase.imageUrl, mapMeta: phase.mapMeta, adjusted: true });
+  }
+
+  function handleCancelAdjustOutline() {
+    if (phase.kind !== 'editor') return;
+    setPhase({ kind: 'confirm', sqft: phase.sqft, imageUrl: phase.imageUrl, mapMeta: phase.mapMeta, adjusted: phase.adjusted });
   }
 
   if (phase.kind === 'loading') {
@@ -240,7 +289,32 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     );
   }
 
+  if (phase.kind === 'editor') {
+    return (
+      <RevealGroup>
+        <RevealItem>
+          <BackChevron onClick={handleCancelAdjustOutline} />
+          <StepHeading
+            eyebrow="Your home"
+            title="Adjust the roof outline"
+            subtitle="Drag the corners so the outline matches your roof."
+          />
+        </RevealItem>
+
+        <RevealItem>
+          <RoofOutlineEditor
+            imageUrl={phase.imageUrl}
+            mapMeta={phase.mapMeta}
+            onApply={handleApplyAdjustedOutline}
+            onCancel={handleCancelAdjustOutline}
+          />
+        </RevealItem>
+      </RevealGroup>
+    );
+  }
+
   if (phase.kind === 'confirm') {
+    const canAdjustOutline = Boolean(phase.mapMeta) && Boolean(phase.imageUrl) && !imgFailed;
     return (
       <RevealGroup>
         <RevealItem>
@@ -277,9 +351,20 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
         </RevealItem>
 
         <RevealItem>
-          <PrimaryButton className="mt-8" onClick={() => handleConfirmSatellite(phase.sqft)}>
-            Looks right, continue
-          </PrimaryButton>
+          <AccuracyNotice className="mt-4 max-w-sm" />
+        </RevealItem>
+
+        <RevealItem>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <PrimaryButton onClick={() => handleConfirmSatellite(phase.sqft, phase.adjusted)}>
+              Looks right, continue
+            </PrimaryButton>
+            {canAdjustOutline && (
+              <SecondaryLinkButton type="button" onClick={handleAdjustOutline}>
+                Adjust outline
+              </SecondaryLinkButton>
+            )}
+          </div>
         </RevealItem>
 
         <RevealItem>
