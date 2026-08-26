@@ -6,6 +6,7 @@ import { StepTransition } from './build/motion';
 import { STEP_IDS, maxAllowedIndex, stepIdFromHash, stepIndex, type StepId } from './build/steps';
 import { getStepFlags, setStepFlagDone } from './build/useStepFlags';
 import StepAddress from './build/StepAddress';
+import AddressChip from './build/AddressChip';
 import StepHome from './build/StepHome';
 import StepShingle from './build/StepShingle';
 import StepColor from './build/StepColor';
@@ -108,6 +109,9 @@ export default function Build() {
           onStepClick={goToStep}
           onStartOver={isPristine ? undefined : handleStartOver}
         />
+        {currentId !== 'address' && buildState.address && (
+          <AddressChip address={buildState.address} onChange={() => goToStep('address')} />
+        )}
         <main
           className="mx-auto max-w-4xl px-4 py-10 md:px-6 md:py-14"
           data-testid="build-step"

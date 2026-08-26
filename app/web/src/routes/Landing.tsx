@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useBuild } from '../state/build';
 import { FINANCING_DISCLOSURE } from '../content/footnote';
 import { validateFloridaAddress } from '../lib/address';
+import AddressCombobox from '../components/AddressCombobox';
 
 const TRUST_POINTS = [
   'No name, phone, or email needed to see your price',
@@ -33,14 +34,32 @@ export default function Landing() {
   const navigate = useNavigate();
   const setAddress = useBuild((s) => s.setAddress);
   const [value, setValue] = useState('');
+  const [placeId, setPlaceId] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
 
   const trimmed = value.trim();
   const validation = validateFloridaAddress(value);
 
+  function handleValueChange(next: string) {
+    setValue(next);
+    setPlaceId(null); // any manual edit invalidates a previously picked suggestion
+  }
+
+  function handleSelectSuggestion(description: string, selectedPlaceId: string) {
+    setValue(description);
+    setPlaceId(selectedPlaceId);
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setTouched(true);
+    // A picked suggestion is Google-canonicalized -- skip the client-side
+    // format check and trust it directly.
+    if (placeId) {
+      setAddress(trimmed, placeId);
+      navigate('/build');
+      return;
+    }
     if (!validation.ok) return;
     setAddress(trimmed);
     navigate('/build');
@@ -64,15 +83,14 @@ export default function Landing() {
             <label htmlFor="landing-address" className="sr-only">
               Property address
             </label>
-            <input
+            <AddressCombobox
               id="landing-address"
-              name="address"
-              type="text"
-              autoComplete="off"
-              placeholder="123 Palm Ave, Tampa, FL 33602"
               value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="min-h-[44px] w-full flex-1 rounded-xl border-2 border-white/15 bg-white px-5 py-4 text-base text-ink outline-none transition-colors focus:border-blue-500"
+              onValueChange={handleValueChange}
+              onSelect={handleSelectSuggestion}
+              placeholder="123 Palm Ave, Tampa, FL 33602"
+              wrapperClassName="relative w-full flex-1"
+              inputClassName="min-h-[44px] w-full rounded-xl border-2 border-white/15 bg-white px-5 py-4 text-base text-ink outline-none transition-colors focus:border-blue-500"
             />
             <button
               type="submit"

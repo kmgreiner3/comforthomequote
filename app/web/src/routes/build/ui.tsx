@@ -162,6 +162,24 @@ export function StartOverLink({
   );
 }
 
+/**
+ * Amber accuracy disclosure for the satellite/adjusted-outline confirm
+ * card (feedback round 5, Task B item 2): the automated measurement -- even
+ * after a homeowner drags the outline to fit -- is never final; a licensed
+ * professional always reviews it. Always visible on that card, not
+ * dismissible.
+ */
+export function AccuracyNotice({ className = '' }: { className?: string }) {
+  return (
+    <div className={`rounded-xl border border-amber-400/40 bg-amber-400/15 p-4 ${className}`}>
+      <p className="text-sm text-ink/80">
+        The automated measurement may not be exact. A licensed professional reviews every roof and
+        makes any needed adjustments before final pricing.
+      </p>
+    </div>
+  );
+}
+
 export function BackChevron({ onClick }: { onClick: () => void }) {
   return (
     <button

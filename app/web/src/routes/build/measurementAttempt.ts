@@ -13,10 +13,12 @@
  * even desirable, for a brand new session to get one fresh attempt.
  */
 
+import { isMapMeta, type MapMeta } from '../../lib/mapMeta';
+
 const STORAGE_KEY = 'chq-measure-attempt-v1';
 
 export type MeasurementAttempt =
-  | { address: string; outcome: 'found'; sqft: number; imageUrl?: string }
+  | { address: string; outcome: 'found'; sqft: number; imageUrl?: string; mapMeta?: MapMeta }
   | { address: string; outcome: 'outside-florida' }
   | { address: string; outcome: 'fallback' };
 
@@ -29,11 +31,13 @@ export function getMeasurementAttempt(): MeasurementAttempt | null {
     if (!parsed || typeof parsed.address !== 'string') return null;
     if (parsed.outcome === 'found' && typeof (parsed as { sqft?: unknown }).sqft === 'number') {
       const imageUrl = (parsed as { imageUrl?: unknown }).imageUrl;
+      const mapMeta = (parsed as { mapMeta?: unknown }).mapMeta;
       return {
         address: parsed.address,
         outcome: 'found',
         sqft: (parsed as { sqft: number }).sqft,
         ...(typeof imageUrl === 'string' ? { imageUrl } : {}),
+        ...(isMapMeta(mapMeta) ? { mapMeta } : {}),
       };
     }
     if (parsed.outcome === 'outside-florida') {

@@ -139,6 +139,180 @@ describe('StepHome satellite measurement: found -> confirm', () => {
   });
 });
 
+// A real mapMeta captured live from /api/measure for a Sarasota, FL home
+// (feedback5a-report.md) -- an internally-consistent center/zoom/bbox
+// combination (unlike an arbitrary hand-picked one, which can imply a wildly
+// unrealistic ground area once projected through the actual mercator math).
+const MAP_META = {
+  centerLat: 27.336230049999998,
+  centerLng: -82.539976,
+  zoom: 20,
+  sw: { lat: 27.3360897, lng: -82.5400199 },
+  ne: { lat: 27.3363704, lng: -82.5399321 },
+  imgW: 1280,
+  imgH: 800,
+};
+
+describe('StepHome satellite measurement: amber accuracy notice (feedback round 5)', () => {
+  it('is always visible on the satellite confirm card', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 2000 }) }))
+    );
+
+    setup();
+    await screen.findByText('We found your roof.');
+
+    expect(
+      screen.getByText(
+        'The automated measurement may not be exact. A licensed professional reviews every roof and makes any needed adjustments before final pricing.'
+      )
+    ).toBeTruthy();
+  });
+});
+
+describe('StepHome satellite measurement: sends placeId to /api/measure when present (feedback round 5)', () => {
+  it('includes placeId in the request body when the store has one', () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => new Promise(() => {}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    useBuild.getState().setAddress(ADDRESS, 'places/abc123');
+    render(<StepHome onContinue={vi.fn()} onBack={vi.fn()} />);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toEqual({ address: ADDRESS, placeId: 'places/abc123' });
+  });
+
+  it('omits placeId entirely for a free-typed address', () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => new Promise(() => {}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    setup();
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toEqual({ address: ADDRESS });
+    expect(body.placeId).toBeUndefined();
+  });
+});
+
+describe('StepHome satellite measurement: adjustable roof outline editor (feedback round 5)', () => {
+  it('shows "Adjust outline" only when mapMeta and an image are both present', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2000, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+    expect(screen.getByRole('button', { name: 'Adjust outline' })).toBeTruthy();
+  });
+
+  it('hides "Adjust outline" when the measure response has no mapMeta (no bounding box)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 2000 }) })
+      )
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+    expect(screen.queryByRole('button', { name: 'Adjust outline' })).toBeNull();
+  });
+
+  it('hides "Adjust outline" once the aerial image has failed to load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2000, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    const img = await screen.findByAltText('Aerial view with your roof outlined');
+    fireEvent.error(img);
+    expect(screen.queryByRole('button', { name: 'Adjust outline' })).toBeNull();
+  });
+
+  it('clicking "Adjust outline" enters the editor, and "Use this outline" commits an adjusted footprint back on the confirm card', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2000, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    const { onContinue } = setup();
+    await screen.findByText('We found your roof.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust outline' }));
+
+    expect(screen.getByText('Adjust the roof outline')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use this outline' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+
+    // Back on the confirm card, with the store now committed as 'adjusted'.
+    await screen.findByText('We found your roof.');
+    expect(
+      screen.getByText(
+        'The automated measurement may not be exact. A licensed professional reviews every roof and makes any needed adjustments before final pricing.'
+      )
+    ).toBeTruthy();
+    const s1 = useBuild.getState();
+    expect(s1.outlineSource).toBe('adjusted');
+    expect(s1.outlineSqft).not.toBeNull();
+
+    // "Looks right, continue" must not re-tag the store back to 'satellite'.
+    fireEvent.click(screen.getByRole('button', { name: 'Looks right, continue' }));
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(useBuild.getState().outlineSource).toBe('adjusted');
+  });
+
+  it('"Cancel" in the editor discards changes and returns to the unadjusted confirm card', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2000, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust outline' }));
+    expect(screen.getByText('Adjust the roof outline')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await screen.findByText('We found your roof.');
+    // Store was never touched by the editor at all -- still whatever it
+    // was before entering (nothing, in this case: outlineSqft untouched).
+    expect(useBuild.getState().outlineSqft).toBeNull();
+    expect(useBuild.getState().outlineSource).toBeNull();
+  });
+
+  it('does not prefill the manual form with an adjusted saved outline either (same leak guard as satellite)', async () => {
+    useBuild.setState({ outlineSource: 'adjusted', outlineSqft: 2417.6 });
+
+    setup();
+
+    const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(document.body.textContent).not.toMatch(/2417/);
+  });
+});
+
 describe('StepHome satellite measurement: property image', () => {
   it('shows the aerial photo above the confirmation message when measure returns an imageUrl', async () => {
     const imageUrl = 'https://chq-visualizer.s3.amazonaws.com/maps/abc123.png?X-Amz-Signature=xyz';

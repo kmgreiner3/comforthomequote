@@ -240,6 +240,149 @@ describe('useBuild store actions', () => {
   });
 });
 
+describe('useBuild store: setAddress semantics (feedback round 5)', () => {
+  it('placeId defaults to null before any address is set', () => {
+    expect(useBuild.getState().placeId).toBeNull();
+  });
+
+  it('setAddress with a placeId stores it alongside the address', () => {
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+    const s = useBuild.getState();
+    expect(s.address).toBe('123 Palm Ave, Tampa, FL 33602');
+    expect(s.placeId).toBe('places/abc123');
+  });
+
+  it('setAddress with no placeId (free-typed) leaves placeId null', () => {
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602');
+    expect(useBuild.getState().placeId).toBeNull();
+  });
+
+  it('setAddress with the SAME address is a no-op: nothing is cleared or rewritten', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+    s0.setOutlineFromSatellite(2000);
+    s0.setPropertyImageUrl('https://example.com/aerial.png');
+    setMeasurementAttempt({ address: '123 Palm Ave, Tampa, FL 33602', outcome: 'found', sqft: 2000 });
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602');
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('123 Palm Ave, Tampa, FL 33602');
+    expect(s.placeId).toBe('places/abc123'); // untouched, not cleared to null
+    expect(s.outlineSqft).toBe(2000);
+    expect(s.sq).not.toBeNull();
+    expect(s.outlineSource).toBe('satellite');
+    expect(s.propertyImageUrl).toBe('https://example.com/aerial.png');
+    expect(getMeasurementAttempt()).not.toBeNull();
+  });
+
+  it('setAddress with the SAME address but a NEWLY PICKED (different) placeId records it and clears the measurement attempt, without touching anything else', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602'); // free-typed, no placeId yet
+    s0.setOutline(2000);
+    s0.setPropertyImageUrl('https://example.com/aerial.png');
+    setMeasurementAttempt({ address: '123 Palm Ave, Tampa, FL 33602', outcome: 'fallback' });
+    expect(getMeasurementAttempt()).not.toBeNull();
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('123 Palm Ave, Tampa, FL 33602');
+    expect(s.placeId).toBe('places/abc123');
+    // The measurement-attempt cache is cleared so /api/measure retries via
+    // the new exact-match geocode...
+    expect(getMeasurementAttempt()).toBeNull();
+    // ...but nothing else about the existing configuration is touched --
+    // it's still the same physical address.
+    expect(s.outlineSqft).toBe(2000);
+    expect(s.propertyImageUrl).toBe('https://example.com/aerial.png');
+  });
+
+  it('setAddress with the SAME address and the SAME placeId (re-passed) is still a full no-op', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+    setMeasurementAttempt({ address: '123 Palm Ave, Tampa, FL 33602', outcome: 'found', sqft: 2000 });
+
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+
+    expect(useBuild.getState().placeId).toBe('places/abc123');
+    expect(getMeasurementAttempt()).not.toBeNull(); // not cleared -- nothing changed
+  });
+
+  it('setAddress with a DIFFERENT address clears outline/sq/outlineSource/propertyImageUrl/placeId and the measurement attempt', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+    s0.setOutlineFromSatellite(2000);
+    s0.setPropertyImageUrl('https://example.com/aerial.png');
+    setMeasurementAttempt({ address: '123 Palm Ave, Tampa, FL 33602', outcome: 'found', sqft: 2000 });
+
+    useBuild.getState().setAddress('456 Ocean Dr, Miami, FL 33139');
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('456 Ocean Dr, Miami, FL 33139');
+    expect(s.placeId).toBeNull();
+    expect(s.outlineSqft).toBeNull();
+    expect(s.sq).toBeNull();
+    expect(s.outlineSource).toBeNull();
+    expect(s.propertyImageUrl).toBeNull();
+    expect(getMeasurementAttempt()).toBeNull();
+  });
+
+  it('a DIFFERENT address paired with a new placeId sets the new placeId (not cleared to null)', () => {
+    useBuild.getState().setAddress('123 Palm Ave, Tampa, FL 33602', 'places/abc123');
+
+    useBuild.getState().setAddress('456 Ocean Dr, Miami, FL 33139', 'places/xyz789');
+
+    expect(useBuild.getState().placeId).toBe('places/xyz789');
+  });
+
+  it('setAddress with a DIFFERENT address PRESERVES shingle/color/underlayment/dripEdge (fast multi-address price checks)', () => {
+    const s0 = useBuild.getState();
+    s0.setAddress('123 Palm Ave, Tampa, FL 33602');
+    s0.setOutline(2000);
+    s0.setShingle('iko-cambridge');
+    s0.setColor('Dual Black');
+    s0.setUnderlayment('peel-stick');
+    s0.setDripEdge('Black');
+
+    useBuild.getState().setAddress('456 Ocean Dr, Miami, FL 33139');
+
+    const s = useBuild.getState();
+    expect(s.address).toBe('456 Ocean Dr, Miami, FL 33139');
+    // Cleared: the prior outline no longer applies to a different property.
+    expect(s.outlineSqft).toBeNull();
+    expect(s.sq).toBeNull();
+    // Preserved: config choices carry over so switching addresses to
+    // compare prices is fast.
+    expect(s.shingle).toBe('iko-cambridge');
+    expect(s.color).toBe('Dual Black');
+    expect(s.underlayment).toBe('peel-stick');
+    expect(s.dripEdge).toBe('Black');
+  });
+});
+
+describe('useBuild store: setOutlineAdjusted (feedback round 5)', () => {
+  it('sets outlineSqft and sq together via the pricing engine, tagged outlineSource=adjusted', () => {
+    useBuild.getState().setOutlineAdjusted(1975);
+    const s = useBuild.getState();
+    expect(s.outlineSqft).toBe(1975);
+    expect(s.sq).toBe(sqFromOutline(1975));
+    expect(s.outlineSource).toBe('adjusted');
+  });
+
+  it('overrides a prior satellite value the same way manual entry does', () => {
+    useBuild.getState().setOutlineFromSatellite(2000);
+    expect(useBuild.getState().outlineSource).toBe('satellite');
+
+    useBuild.getState().setOutlineAdjusted(2150);
+
+    const s = useBuild.getState();
+    expect(s.outlineSource).toBe('adjusted');
+    expect(s.outlineSqft).toBe(2150);
+    expect(s.sq).toBe(sqFromOutline(2150));
+  });
+});
+
 describe('derived selectors', () => {
   it('are null before sq/shingle are set', () => {
     const s = useBuild.getState();
@@ -351,5 +494,7 @@ describe('persistence', () => {
     expect(s.sq).toBe(24);
     // Missing from the legacy blob -> falls back to the default, not undefined.
     expect(s.outlineSource).toBeNull();
+    // placeId is even newer than outlineSource -- same missing-key safety.
+    expect(s.placeId).toBeNull();
   });
 });

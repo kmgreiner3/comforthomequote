@@ -2,13 +2,16 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { GetParameterCommand, ParameterNotFound, SSMClient } from '@aws-sdk/client-ssm';
 import {
+  buildMapMeta,
   computeOverlayZoom,
   geocodeAddress,
+  geocodeByPlaceId,
   getGoogleApiKey,
   getGroundAreaSqft,
   getStaticMapPng,
   metersToSqft,
   resetGoogleApiKeyCache,
+  suggestAddresses,
 } from '../src/lib/google';
 
 const ssmMock = mockClient(SSMClient);
@@ -103,6 +106,37 @@ describe('geocodeAddress', () => {
   });
 });
 
+describe('geocodeByPlaceId', () => {
+  it('requests an exact-match geocode by place_id (no address ambiguity)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            address_components: [{ short_name: 'FL', types: ['administrative_area_level_1'] }],
+            geometry: { location: { lat: 27.95, lng: -82.46 } },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await geocodeByPlaceId('ChIJ_fake_place_id', 'fake-key');
+
+    expect(result.found).toBe(true);
+    expect(result.state).toBe('FL');
+    const requestedUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(requestedUrl.searchParams.get('place_id')).toBe('ChIJ_fake_place_id');
+    expect(requestedUrl.searchParams.has('address')).toBe(false);
+  });
+
+  it('returns not found when Google has no results for the placeId', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) }));
+    const result = await geocodeByPlaceId('ChIJ_unknown', 'fake-key');
+    expect(result.found).toBe(false);
+  });
+});
+
 const BBOX_FIXTURE = {
   sw: { latitude: 27.9490, longitude: -82.4610 },
   ne: { latitude: 27.9510, longitude: -82.4590 },
@@ -141,6 +175,39 @@ describe('getGroundAreaSqft', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
     const result = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
     expect(result).toBeNull();
+  });
+
+  it('requests requiredQuality=LOW so imagery of any quality is used, not HIGH-only', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getGroundAreaSqft(27.95, -82.46, 'fake-key');
+
+    const requestedUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(requestedUrl.searchParams.get('requiredQuality')).toBe('LOW');
+  });
+
+  it('golden: resolves found (non-null) for a MEDIUM-quality imagery fixture -- the round-5 fix for homes that used to fall to manual', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          boundingBox: BBOX_FIXTURE,
+          imageryQuality: 'MEDIUM',
+          solarPotential: { wholeRoofStats: { groundAreaMeters2: 150 } },
+        }),
+      }),
+    );
+
+    const result = await getGroundAreaSqft(27.95, -82.46, 'fake-key');
+
+    expect(result).not.toBeNull();
+    expect(result?.groundAreaSqft).toBeCloseTo(150 * 10.7639104167, 5);
+    expect(result?.boundingBox).toEqual(BBOX_FIXTURE);
   });
 });
 
@@ -269,5 +336,112 @@ describe('computeOverlayZoom', () => {
     };
     // raw ~= 15.8609 -> floor 15 -> clamp(17,20) -> 17
     expect(computeOverlayZoom(box)).toBe(17);
+  });
+});
+
+describe('buildMapMeta', () => {
+  it('matches the exact center/zoom the static map URL builder uses for the same box (single source of truth)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getStaticMapPng(27.95, -82.46, 'fake-key', BBOX_FIXTURE);
+    const requestedUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    const meta = buildMapMeta(BBOX_FIXTURE);
+
+    expect(`${meta.centerLat},${meta.centerLng}`).toBe(requestedUrl.searchParams.get('center'));
+    expect(String(meta.zoom)).toBe(requestedUrl.searchParams.get('zoom'));
+    expect(meta.zoom).toBe(computeOverlayZoom(BBOX_FIXTURE));
+  });
+
+  it('passes through sw/ne verbatim and reports the scale-2 pixel dimensions (size=640x400, scale=2)', () => {
+    const meta = buildMapMeta(BBOX_FIXTURE);
+    expect(meta.sw).toEqual({ lat: BBOX_FIXTURE.sw.latitude, lng: BBOX_FIXTURE.sw.longitude });
+    expect(meta.ne).toEqual({ lat: BBOX_FIXTURE.ne.latitude, lng: BBOX_FIXTURE.ne.longitude });
+    expect(meta.imgW).toBe(1280);
+    expect(meta.imgH).toBe(800);
+  });
+});
+
+describe('suggestAddresses', () => {
+  function suggestionsResponse(descriptions: Array<{ text: string; placeId: string }>) {
+    return {
+      ok: true,
+      json: async () => ({
+        suggestions: descriptions.map((d) => ({
+          placePrediction: { placeId: d.placeId, text: { text: d.text } },
+        })),
+      }),
+    };
+  }
+
+  it('POSTs to Places Autocomplete (New) with the key header, sessionToken, and includedRegionCodes:["us"]', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(suggestionsResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await suggestAddresses('1530 Main St Sar', 'session-abc', 'fake-key');
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://places.googleapis.com/v1/places:autocomplete');
+    expect(init.method).toBe('POST');
+    expect(init.headers['X-Goog-Api-Key']).toBe('fake-key');
+    const sentBody = JSON.parse(init.body as string);
+    expect(sentBody).toEqual({
+      input: '1530 Main St Sar',
+      sessionToken: 'session-abc',
+      includedRegionCodes: ['us'],
+    });
+  });
+
+  it('filters results to Florida (description contains ", FL") and maps to {description, placeId}', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        suggestionsResponse([
+          { text: '1530 Main St, Sarasota, FL, USA', placeId: 'place-fl-1' },
+          { text: '1530 Main St, Atlanta, GA, USA', placeId: 'place-ga-1' },
+          { text: '1531 Main St, Tampa, FL, USA', placeId: 'place-fl-2' },
+        ]),
+      ),
+    );
+
+    const result = await suggestAddresses('1530 Main St', undefined, 'fake-key');
+
+    expect(result).toEqual([
+      { description: '1530 Main St, Sarasota, FL, USA', placeId: 'place-fl-1' },
+      { description: '1531 Main St, Tampa, FL, USA', placeId: 'place-fl-2' },
+    ]);
+  });
+
+  it('caps results at 5 even when Google returns more Florida matches', async () => {
+    const flDescriptions = Array.from({ length: 8 }, (_, i) => ({
+      text: `${100 + i} Main St, Tampa, FL, USA`,
+      placeId: `place-${i}`,
+    }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(suggestionsResponse(flDescriptions)));
+
+    const result = await suggestAddresses('Main St', undefined, 'fake-key');
+
+    expect(result).toHaveLength(5);
+  });
+
+  it('returns null (never throws) on a non-200 response, e.g. 403 when Places API (New) is not yet enabled', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    const result = await suggestAddresses('1530 Main St', undefined, 'fake-key');
+    expect(result).toBeNull();
+  });
+
+  it('returns null (never throws) when fetch itself rejects', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+    const result = await suggestAddresses('1530 Main St', undefined, 'fake-key');
+    expect(result).toBeNull();
+  });
+
+  it('returns an empty array (not null) for a successful call with no Florida matches', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(suggestionsResponse([{ text: '1 Main St, Atlanta, GA, USA', placeId: 'place-ga' }])),
+    );
+    const result = await suggestAddresses('1 Main St', undefined, 'fake-key');
+    expect(result).toEqual([]);
   });
 });
