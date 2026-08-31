@@ -121,6 +121,12 @@ export interface BuildState {
   // Continue on the home step); 0 means answered "No solar panels".
   solarPanels: number | null;
   dripEdge: DripEdge | null;
+  // Visualizer upload handle from POST /api/visualize/upload. Persisted so
+  // a return visit reuses the photo instead of asking for it again; the
+  // backend objects expire after 30 days, and the panel clears this field
+  // when the API reports the upload is gone (404). Only the id persists --
+  // presigned render URLs are short-lived and stay in memory.
+  vizUploadId: string | null;
   accepted: boolean; // set by "I'm Ready to Move Forward"
   contact: Contact | null;
   visit: Visit | null;
@@ -191,6 +197,7 @@ export interface BuildState {
   // question UI itself is Commit 2's job). Pass null to mark unanswered.
   setSolarPanels(n: number | null): void;
   setDripEdge(c: DripEdge): void;
+  setVizUploadId(id: string | null): void;
   accept(): void;
   setContact(c: Contact): void;
   setVisit(v: Visit): void;
@@ -219,6 +226,7 @@ type PersistedFields = Pick<
   | 'color'
   | 'solarPanels'
   | 'dripEdge'
+  | 'vizUploadId'
   | 'accepted'
   | 'contact'
   | 'visit'
@@ -237,6 +245,7 @@ const initialState: PersistedFields = {
   color: null,
   solarPanels: null,
   dripEdge: null,
+  vizUploadId: null,
   accepted: false,
   contact: null,
   visit: null,
@@ -326,6 +335,7 @@ export const useBuild = create<BuildState>()(
       setColor: (c) => set({ color: c }),
       setSolarPanels: (n) => set({ solarPanels: n }),
       setDripEdge: (c) => set({ dripEdge: c }),
+      setVizUploadId: (id) => set({ vizUploadId: id }),
       accept: () => set({ accepted: true }),
       setContact: (c) => set({ contact: c }),
       setVisit: (v) => set({ visit: v }),
