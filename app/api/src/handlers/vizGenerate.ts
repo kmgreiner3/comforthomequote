@@ -6,9 +6,15 @@ import type { ShingleKey } from '@chq/pricing';
 import { SHINGLES } from '@chq/pricing';
 import { clientIp, json, parseBody } from '../lib/http';
 import { checkAndIncrement, todayStamp } from '../lib/ratelimit';
-import { generateRoofImage } from '../lib/bedrock';
+import { generateRoofImage, type DripEdgeColor } from '../lib/bedrock';
 import { COLOR_DESCRIPTIONS } from '../lib/colorDescriptions';
 import { slugify } from '../lib/slug';
+
+const DRIP_EDGE_COLORS: readonly DripEdgeColor[] = ['White', 'Black', 'Brown'];
+
+function isDripEdgeColor(value: unknown): value is DripEdgeColor {
+  return typeof value === 'string' && (DRIP_EDGE_COLORS as readonly string[]).includes(value);
+}
 
 // Module-scope clients so aws-sdk-client-mock intercepts every call.
 const s3 = new S3Client({});
@@ -28,6 +34,10 @@ interface GenerateBody {
   uploadId?: string;
   product?: string;
   color?: string;
+  // Feedback round 8, item 17: optional -- appends a drip edge trim mention
+  // to the render prompt when present. Omitted entirely is fine (existing
+  // callers keep working); any value other than the three real colors 400s.
+  dripEdge?: string;
 }
 
 function isShingleKey(value: string): value is ShingleKey {
@@ -57,12 +67,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   const uploadId = body?.uploadId;
   const product = body?.product;
   const color = body?.color;
+  const dripEdge = body?.dripEdge;
 
   if (!uploadId || !product || !color) {
     return json(400, { error: 'uploadId, product and color are required' });
   }
   if (!isShingleKey(product) || !SHINGLES[product].colors.includes(color)) {
     return json(400, { error: 'unknown product or color' });
+  }
+  if (dripEdge !== undefined && !isDripEdgeColor(dripEdge)) {
+    return json(400, { error: 'invalid dripEdge' });
   }
 
   const uploadItem = await ddb.send(
@@ -74,7 +88,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   }
 
   const slug = slugify(color);
-  const renderKey = `renders/${uploadId}/${product}/${slug}.png`;
+  // The drip edge trim changes what actually gets rendered, so it has to
+  // be part of the cache key too -- otherwise a render cached without a
+  // drip edge mention would wrongly satisfy a later request that asked
+  // for one (or vice versa).
+  const dripEdgeSuffix = dripEdge ? `-${slugify(dripEdge)}` : '';
+  const renderKey = `renders/${uploadId}/${product}/${slug}${dripEdgeSuffix}.png`;
 
   // Cache check happens before any rate-limit counters are touched: a
   // cache hit is free (no Bedrock call), so it must not consume either cap.
@@ -103,7 +122,13 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       const uploadObject = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: uploadKey }));
       const imageBase64 = await bodyToBase64(uploadObject.Body);
       const description = COLOR_DESCRIPTIONS[color] ?? '';
-      const renderBase64 = await generateRoofImage(MODEL_ID, imageBase64, color, description);
+      const renderBase64 = await generateRoofImage(
+        MODEL_ID,
+        imageBase64,
+        color,
+        description,
+        dripEdge as DripEdgeColor | undefined,
+      );
       await s3.send(
         new PutObjectCommand({
           Bucket: BUCKET,

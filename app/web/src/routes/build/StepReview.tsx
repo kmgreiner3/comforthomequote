@@ -4,18 +4,15 @@ import {
   selectCash,
   selectGuarantee,
   selectMonthly,
+  selectSolarCost,
   selectTotal,
   useBuild,
 } from '../../state/build';
 import { perMonth, usd } from '../../lib/format';
 import { DECKING_DISCLOSURE, INCLUDED_TILES } from '../../content/included';
+import { MANUFACTURER_WARRANTY_LINE } from '../../content/warranty';
 import { CheckMark, SecondaryLinkButton, StartOverLink, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
-
-const UNDERLAYMENT_SUMMARY: Record<'synthetic' | 'peel-stick', string> = {
-  synthetic: 'Standard Synthetic',
-  'peel-stick': 'Premium Peel & Stick',
-};
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
@@ -36,13 +33,14 @@ export default function StepReview({
   const state = useBuild();
   const navigate = useNavigate();
 
-  const { address, shingle, color, underlayment, dripEdge } = state;
+  const { address, shingle, color, dripEdge, solarPanels } = state;
   if (shingle == null || color == null || dripEdge == null) return null; // shouldn't render: gated behind full config
 
   const total = selectTotal(state);
   const monthly = selectMonthly(state);
   const cash = selectCash(state);
   const guaranteeInfo = selectGuarantee(state);
+  const solarCost = selectSolarCost(state);
   if (total == null || monthly == null || cash == null || guaranteeInfo == null) return null;
 
   function handleReady() {
@@ -62,10 +60,17 @@ export default function StepReview({
             {address && <SummaryRow label="Property" value={address} />}
             <SummaryRow label="System" value={SHINGLES[shingle].name} />
             <SummaryRow label="Color" value={color} />
-            <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY[underlayment]} />
+            <SummaryRow label="Peel and stick underlayment" value="Included" />
             <SummaryRow label="Drip edge" value={dripEdge} />
+            {solarPanels != null && solarPanels > 0 && solarCost != null && (
+              <SummaryRow
+                label={`Solar panel removal and reinstall (${solarPanels} panels)`}
+                value={`+${usd(solarCost)}`}
+              />
+            )}
             <SummaryRow label="Protection level" value={guaranteeInfo.level} />
             <SummaryRow label="Workmanship guarantee" value={`${guaranteeInfo.years} years`} />
+            <SummaryRow label="Manufacturer warranty" value={MANUFACTURER_WARRANTY_LINE[shingle]} />
           </div>
 
           <div className="mt-5 rounded-2xl border-2 border-navy-950/10 bg-white p-6">
@@ -88,9 +93,10 @@ export default function StepReview({
             <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Your price</p>
             <p className="mt-2 font-display text-4xl font-semibold tabular-nums">{usd(total)}</p>
             <p className="mt-1 text-sm text-white/70">or approximately {perMonth(monthly)}*</p>
-            <p className="mt-4 border-t border-white/10 pt-4 text-sm text-white/80">
-              Pay cash: {usd(cash)} (5% discount, half upfront and half on completion)
-            </p>
+            <div className="mt-4 border-t border-white/10 pt-4 text-sm text-white/80">
+              <p>Pay cash: {usd(cash)} (5% discount)</p>
+              <p className="mt-1">Pay schedule: 50% on signing, 50% on completion</p>
+            </div>
           </div>
 
           <p className="mt-4 text-xs leading-relaxed text-ink/50">{DECKING_DISCLOSURE}</p>

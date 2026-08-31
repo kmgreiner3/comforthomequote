@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import ProgressRail from './ProgressRail';
 
+// Feedback round 8: the 9-step flow collapsed to 5 -- home, shingle,
+// appearance, included, review (indices 0-4).
 describe('ProgressRail: earned-step navigation', () => {
   it('renders earned steps as enabled buttons and unearned steps as disabled buttons', () => {
     const onStepClick = vi.fn();
@@ -14,15 +16,15 @@ describe('ProgressRail: earned-step navigation', () => {
       />
     );
 
-    // Earned (address, home, shingle -- indices 0-2): real, enabled buttons.
-    const shingleButton = screen.getByRole('button', { name: 'Go to Shingle step' }) as HTMLButtonElement;
-    expect(shingleButton.disabled).toBe(false);
-    expect(shingleButton.tagName).toBe('BUTTON');
+    // Earned (home, shingle, appearance -- indices 0-2): real, enabled buttons.
+    const appearanceButton = screen.getByRole('button', { name: 'Go to Appearance step' }) as HTMLButtonElement;
+    expect(appearanceButton.disabled).toBe(false);
+    expect(appearanceButton.tagName).toBe('BUTTON');
 
-    // Unearned (color and beyond -- index 3+): disabled buttons, not divs.
-    const colorButton = screen.getByRole('button', { name: 'Go to Color step' }) as HTMLButtonElement;
-    expect(colorButton.disabled).toBe(true);
-    expect(colorButton.tagName).toBe('BUTTON');
+    // Unearned (included and beyond -- index 3+): disabled buttons, not divs.
+    const includedButton = screen.getByRole('button', { name: 'Go to Included step' }) as HTMLButtonElement;
+    expect(includedButton.disabled).toBe(true);
+    expect(includedButton.tagName).toBe('BUTTON');
   });
 
   it('marks the current step distinctly via aria-current', () => {
@@ -30,7 +32,7 @@ describe('ProgressRail: earned-step navigation', () => {
       <ProgressRail currentIndex={2} maxAllowedIndex={4} onStepClick={vi.fn()} onStartOver={vi.fn()} />
     );
 
-    const currentButton = screen.getByRole('button', { name: 'Go to Shingle step' });
+    const currentButton = screen.getByRole('button', { name: 'Go to Appearance step' });
     expect(currentButton.getAttribute('aria-current')).toBe('step');
 
     const otherButton = screen.getByRole('button', { name: 'Go to Home step' });
@@ -48,8 +50,8 @@ describe('ProgressRail: earned-step navigation', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Go to Color step' }));
-    expect(onStepClick).toHaveBeenCalledWith('color');
+    fireEvent.click(screen.getByRole('button', { name: 'Go to Appearance step' }));
+    expect(onStepClick).toHaveBeenCalledWith('appearance');
   });
 
   it('clicking a disabled (unearned) step button never calls onStepClick', () => {

@@ -4,7 +4,7 @@ import {
   configuredTotal,
   estimatedMonthly,
   guarantee,
-  peelStickUpgrade,
+  solarCost,
   sqFromOutline,
   titanUpgrade,
 } from '@chq/pricing';
@@ -12,7 +12,7 @@ import {
   selectCash,
   selectGuarantee,
   selectMonthly,
-  selectPeelStickDelta,
+  selectSolarCost,
   selectTotal,
   selectUpgradeDelta,
   useBuild,
@@ -101,8 +101,8 @@ describe('useBuild store actions', () => {
     expect(useBuild.getState().color).toBe('Dual Black');
   });
 
-  it('defaults underlayment to synthetic', () => {
-    expect(useBuild.getState().underlayment).toBe('synthetic');
+  it('defaults solarPanels to null (unanswered)', () => {
+    expect(useBuild.getState().solarPanels).toBeNull();
   });
 
   it('accept() sets accepted true', () => {
@@ -134,7 +134,7 @@ describe('useBuild store actions', () => {
     s0.setOutlineFromSatellite(2000);
     s0.setShingle('iko-cambridge');
     s0.setColor('Dual Black');
-    s0.setUnderlayment('peel-stick');
+    s0.setSolarPanels(12);
     s0.setDripEdge('Black');
     s0.accept();
     s0.setContact({ name: 'a', phone: 'b', email: 'c', billing: 'd', method: 'e' });
@@ -149,7 +149,7 @@ describe('useBuild store actions', () => {
     expect(s.outlineSource).toBeNull();
     expect(s.shingle).toBeNull();
     expect(s.color).toBeNull();
-    expect(s.underlayment).toBe('synthetic');
+    expect(s.solarPanels).toBeNull();
     expect(s.dripEdge).toBeNull();
     expect(s.accepted).toBe(false);
     expect(s.contact).toBeNull();
@@ -163,7 +163,7 @@ describe('useBuild store actions', () => {
     s0.setPropertyImageUrl('https://example.com/aerial.png');
     s0.setShingle('iko-cambridge');
     s0.setColor('Dual Black');
-    s0.setUnderlayment('peel-stick');
+    s0.setSolarPanels(12);
     s0.setDripEdge('Black');
     s0.accept();
     s0.setContact({ name: 'a', phone: 'b', email: 'c', billing: 'd', method: 'e' });
@@ -179,7 +179,7 @@ describe('useBuild store actions', () => {
     expect(s.propertyImageUrl).toBeNull();
     expect(s.shingle).toBeNull();
     expect(s.color).toBeNull();
-    expect(s.underlayment).toBe('synthetic');
+    expect(s.solarPanels).toBeNull();
     expect(s.dripEdge).toBeNull();
     expect(s.accepted).toBe(false);
     expect(s.contact).toBeNull();
@@ -188,8 +188,7 @@ describe('useBuild store actions', () => {
 
   it('resetQuote() also wipes the step-flags localStorage and the measurement-attempt sessionStorage', () => {
     // Populate the two sibling storages the same way the real flow would.
-    setStepFlagDone('underlayment');
-    setStepFlagDone('protection');
+    setStepFlagDone('included');
     setMeasurementAttempt({ address: '1 Main St', outcome: 'found', sqft: 1850.5 });
 
     expect(localStorage.getItem(STEP_FLAGS_KEY)).not.toBeNull();
@@ -199,7 +198,7 @@ describe('useBuild store actions', () => {
 
     expect(localStorage.getItem(STEP_FLAGS_KEY)).toBeNull();
     expect(sessionStorage.getItem(MEASUREMENT_ATTEMPT_KEY)).toBeNull();
-    expect(getStepFlags()).toEqual({ underlayment: false, protection: false, included: false });
+    expect(getStepFlags()).toEqual({ included: false });
     expect(getMeasurementAttempt()).toBeNull();
   });
 
@@ -231,12 +230,12 @@ describe('useBuild store actions', () => {
     s0.setOutline(2000);
     s0.setShingle('tamko-titan-xt');
     s0.setColor('Rustic Black');
-    setStepFlagDone('underlayment');
+    setStepFlagDone('included');
 
     useBuild.getState().resetQuote();
 
     expect(localStorage.getItem(STORAGE_KEY)).toContain('"address":null');
-    expect(getStepFlags().underlayment).toBe(false);
+    expect(getStepFlags().included).toBe(false);
   });
 });
 
@@ -368,13 +367,12 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
     expect(useBuild.getState().placeId).toBe('places/xyz789');
   });
 
-  it('setAddress with a DIFFERENT address PRESERVES shingle/color/underlayment/dripEdge (fast multi-address price checks)', () => {
+  it('setAddress with a DIFFERENT address PRESERVES shingle/color/dripEdge (fast multi-address price checks)', () => {
     const s0 = useBuild.getState();
     s0.setAddress('123 Palm Ave, Tampa, FL 33602');
     s0.setOutline(2000);
     s0.setShingle('iko-cambridge');
     s0.setColor('Dual Black');
-    s0.setUnderlayment('peel-stick');
     s0.setDripEdge('Black');
 
     useBuild.getState().setAddress('456 Ocean Dr, Miami, FL 33139');
@@ -388,7 +386,6 @@ describe('useBuild store: setAddress semantics (feedback round 5)', () => {
     // compare prices is fast.
     expect(s.shingle).toBe('iko-cambridge');
     expect(s.color).toBe('Dual Black');
-    expect(s.underlayment).toBe('peel-stick');
     expect(s.dripEdge).toBe('Black');
   });
 });
@@ -767,26 +764,34 @@ describe('adoptCanonicalAddress (feedback round 7, Task C item 1)', () => {
 });
 
 describe('derived selectors', () => {
-  it('are null before sq/shingle are set', () => {
+  it('are null before sq/shingle/solarPanels are set', () => {
     const s = useBuild.getState();
     expect(selectTotal(s)).toBeNull();
     expect(selectMonthly(s)).toBeNull();
     expect(selectGuarantee(s)).toBeNull();
     expect(selectCash(s)).toBeNull();
     expect(selectUpgradeDelta(s)).toBeNull();
-    expect(selectPeelStickDelta(s)).toBeNull();
+    expect(selectSolarCost(s)).toBeNull();
   });
 
-  it('golden: outline 2000 + IKO + peel-stick -> total 13200, monthly 132, guarantee BETTER+/10yr', () => {
+  it('golden: outline 2000 + IKO + 12 solar panels -> total 15600, monthly 156', () => {
+    // sq = sqFromOutline(2000) = 24
+    // configuredTotal(24, 'iko-cambridge', 12)
+    //   = priceShingle(24, iko) [12000, anchor]
+    //   + roundUpDollars(24 x 50) [1200, peel and stick baked in]
+    //   + solarCost(12) [2400]
+    //   = 15600
+    // selectMonthly = estimatedMonthly(15600) = ceil(15600 / 100) = 156
     const s0 = useBuild.getState();
     s0.setOutline(2000);
     s0.setShingle('iko-cambridge');
-    s0.setUnderlayment('peel-stick');
+    s0.setSolarPanels(12);
 
     const s = useBuild.getState();
-    expect(selectTotal(s)).toBe(13200);
-    expect(selectMonthly(s)).toBe(132);
-    expect(selectGuarantee(s)).toEqual({ level: 'BETTER+', years: 10 });
+    expect(selectTotal(s)).toBe(15600);
+    expect(selectMonthly(s)).toBe(156);
+    expect(selectGuarantee(s)).toEqual({ level: 'BETTER', years: 5 });
+    expect(selectSolarCost(s)).toBe(2400);
   });
 
   it('golden: titanUpgrade(sq 24) = 1200 via selectUpgradeDelta', () => {
@@ -795,21 +800,26 @@ describe('derived selectors', () => {
     expect(titanUpgrade(24)).toBe(1200);
   });
 
+  it('selectSolarCost is 0, not null, once solarPanels is explicitly answered as 0', () => {
+    useBuild.getState().setSolarPanels(0);
+    expect(selectSolarCost(useBuild.getState())).toBe(0);
+  });
+
   it('match direct engine calls for an arbitrary (non-golden) configuration', () => {
     const s0 = useBuild.getState();
     s0.setOutline(2286);
     s0.setShingle('tamko-titan-xt');
-    s0.setUnderlayment('synthetic');
+    s0.setSolarPanels(7);
 
     const s = useBuild.getState();
     const sq = sqFromOutline(2286);
-    const expectedTotal = configuredTotal(sq, 'tamko-titan-xt', 'synthetic');
+    const expectedTotal = configuredTotal(sq, 'tamko-titan-xt', 7);
 
     expect(selectTotal(s)).toBe(expectedTotal);
     expect(selectMonthly(s)).toBe(estimatedMonthly(expectedTotal));
     expect(selectUpgradeDelta(s)).toBe(titanUpgrade(sq));
-    expect(selectPeelStickDelta(s)).toBe(peelStickUpgrade(sq));
-    expect(selectGuarantee(s)).toEqual(guarantee('tamko-titan-xt', 'synthetic'));
+    expect(selectSolarCost(s)).toBe(solarCost(7));
+    expect(selectGuarantee(s)).toEqual(guarantee('tamko-titan-xt'));
     expect(selectCash(s)).toBe(cashPrice(expectedTotal));
   });
 });
@@ -879,5 +889,145 @@ describe('persistence', () => {
     expect(s.outlineSource).toBeNull();
     // placeId is even newer than outlineSource -- same missing-key safety.
     expect(s.placeId).toBeNull();
+  });
+});
+
+describe('persist migration: version 3 drops underlayment, adds solarPanels (feedback round 8)', () => {
+  function legacyBlobWithUnderlayment(underlayment: 'synthetic' | 'peel-stick', version: number) {
+    return JSON.stringify({
+      state: {
+        address: '1 Main St',
+        outlineSqft: 2000,
+        sq: 24,
+        shingle: 'iko-cambridge',
+        color: 'Dual Black',
+        underlayment,
+        dripEdge: null,
+        accepted: false,
+        contact: null,
+        visit: null,
+      },
+      version,
+    });
+  }
+
+  it('drops a persisted underlayment of synthetic and defaults solarPanels to null', async () => {
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlobWithUnderlayment('synthetic', 1));
+
+    await useBuild.persist.rehydrate();
+
+    const s = useBuild.getState();
+    expect((s as unknown as Record<string, unknown>).underlayment).toBeUndefined();
+    expect(s.solarPanels).toBeNull();
+    expect(s.address).toBe('1 Main St');
+    expect(s.shingle).toBe('iko-cambridge');
+  });
+
+  it('drops a persisted underlayment of peel-stick the same way', async () => {
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlobWithUnderlayment('peel-stick', 1));
+
+    await useBuild.persist.rehydrate();
+
+    const s = useBuild.getState();
+    expect((s as unknown as Record<string, unknown>).underlayment).toBeUndefined();
+    expect(s.solarPanels).toBeNull();
+  });
+
+  it('defaults solarPanels to null when a version 0 (pre-round-6) blob has no solarPanels key at all', async () => {
+    useBuild.getState().reset();
+    localStorage.setItem(STORAGE_KEY, legacyBlobWithUnderlayment('synthetic', 0));
+
+    await useBuild.persist.rehydrate();
+
+    const s = useBuild.getState();
+    expect(s.solarPanels).toBeNull();
+    expect((s as unknown as Record<string, unknown>).underlayment).toBeUndefined();
+  });
+
+  it('still applies the version 1 outlineCorners upgrade for a chain that predates both migrations (version 0)', async () => {
+    // Same 4-point-to-6-point transform covered above, plus this release's
+    // underlayment drop and solarPanels default, both applying together to
+    // one persisted blob that is two migrations behind current.
+    const legacyFourCorners = [
+      { lat: 1, lng: 1 },
+      { lat: 1, lng: 2 },
+      { lat: 2, lng: 2 },
+      { lat: 2, lng: 1 },
+    ];
+    useBuild.getState().reset();
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          address: '1 Main St',
+          outlineCorners: legacyFourCorners,
+          shingle: null,
+          color: null,
+          underlayment: 'synthetic',
+          dripEdge: null,
+          accepted: false,
+          contact: null,
+          visit: null,
+        },
+        version: 0,
+      })
+    );
+
+    await useBuild.persist.rehydrate();
+
+    const s = useBuild.getState();
+    expect(s.outlineCorners).toHaveLength(6);
+    expect((s as unknown as Record<string, unknown>).underlayment).toBeUndefined();
+    expect(s.solarPanels).toBeNull();
+  });
+
+  it('leaves an already-migrated solarPanels value alone (no double-default over a real answer)', async () => {
+    useBuild.getState().reset();
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          address: '1 Main St',
+          shingle: 'iko-cambridge',
+          color: 'Dual Black',
+          dripEdge: null,
+          solarPanels: 5,
+          accepted: false,
+          contact: null,
+          visit: null,
+        },
+        version: 3,
+      })
+    );
+
+    await useBuild.persist.rehydrate();
+
+    expect(useBuild.getState().solarPanels).toBe(5);
+  });
+
+  it('leaves a real answer of 0 panels alone too (0 is a valid answer, not "missing")', async () => {
+    useBuild.getState().reset();
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          address: '1 Main St',
+          shingle: 'iko-cambridge',
+          color: 'Dual Black',
+          dripEdge: null,
+          solarPanels: 0,
+          accepted: false,
+          contact: null,
+          visit: null,
+        },
+        version: 3,
+      })
+    );
+
+    await useBuild.persist.rehydrate();
+
+    expect(useBuild.getState().solarPanels).toBe(0);
   });
 });

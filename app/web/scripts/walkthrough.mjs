@@ -1,25 +1,28 @@
 #!/usr/bin/env node
-// Playwright walkthrough for the configurator wizard (Task 4), the landing
-// page, About page, and post-acceptance demo flow (Task 5), and the Metal &
-// Tile education page (Task 6).
+// Playwright walkthrough for the configurator wizard (feedback round 8's
+// 5-step flow), the landing page, About page, and post-acceptance demo
+// flow, and the Metal & Tile education page.
 //
 // Builds `app/web`, serves the built `dist/` with `vite preview`, then:
 //
 //   0. Reproduces the reported cold-load scroll-jump directly: a fresh
-//      browser context (empty storage) loading /build#address at both
+//      browser context (empty storage) loading /build#home at both
 //      390x844 and 1280x800 must land with window.scrollY === 0 and the
 //      header + step heading visible in the viewport.
-//   1. Drives the happy path end to end on a 390x844 context:
-//        123 Palm Ave, Tampa, FL 33602 -> 2000 sq ft -> Titan XT -> Rustic Black
-//        -> peel & stick -> protection continue -> included continue
-//        -> drip edge Black -> review
-//      asserting PriceHero is absent before a shingle is chosen, that the
-//      home step's satellite measurement (Plan 4 Task 3) falls back to the
-//      plain manual form silently -- no error/loading text left on screen --
-//      since preview has no live /api/measure, that the color step renders
-//      a real <img> swatch grid (not colored divs) and its description
-//      panel updates to the selected color's name, and that the review page
-//      shows $14,400 and $144/month.
+//   1. Drives the happy path end to end on a 390x844 context, on the 5-step
+//      flow (feedback round 8): Home (address entry -> satellite/manual
+//      measurement -> solar question) -> Shingle -> Appearance (color +
+//      drip edge) -> Included -> Review. Asserts PriceHero is absent
+//      before a shingle is chosen, that the home step's satellite
+//      measurement falls back to the plain manual form silently -- no
+//      error/loading text left on screen -- since preview has no live
+//      /api/measure, that confirming the outline (or using the manual
+//      form) never itself navigates -- the solar question appears below,
+//      on the SAME step -- and that only answering it and pressing the
+//      real Continue advances to Shingle, that the appearance step renders
+//      a real <img> swatch grid (not colored divs) with its description
+//      panel updating to the selected color's name, and that the review
+//      page shows $14,400 and $144/month (Titan XT, 0 solar panels).
 //   2. Re-walks every step at 1280x800 via a FRESH full page load per step
 //      (a cache-busting query param forces a real navigation rather than
 //      an in-document fragment-only jump, since the state is already
@@ -34,42 +37,42 @@
 //      from the 1280 walk), again capturing the documents section.
 //   4. On fresh contexts (per width), verifies the landing page's address
 //      input navigates to /build with the address pre-filled (landing on
-//      the home-size step, not the address step), then loads /about.
+//      the home step, address entry already satisfied), then loads /about.
 //   5. On fresh contexts (per width), loads /metal; on the 1280 pass, opens
 //      the Lightbox on flyer-1, screenshots it, closes it via Escape, and
 //      asserts body scroll (locked while the Lightbox is open) is restored.
-//   6. Feedback round 5 (Task B): the address step's autocomplete combobox
-//      degrades silently to a plain input in preview (no live
-//      /api/address-suggest) -- asserted on both the mobile fill and the
-//      1280 fresh-load pass (no dropdown ever renders, no console/page
-//      error). The address chip (current address + "Change") is asserted
-//      visible on the home and shingle steps. Since preview also has no
-//      live /api/measure, the satellite confirm card (amber accuracy
-//      notice, "Adjust outline") is otherwise unreachable -- a dedicated
-//      fresh-context check mocks /api/measure (found:true + mapMeta) at
-//      both widths to screenshot it directly, and also drives a real
-//      pointer drag on one of the outline editor's points (feedback round
-//      6/7). The editor's own drag/geometry logic is covered by
-//      RoofOutlineEditor's own component tests, not here.
-//   7. Feedback round 7 (Task C): the outline editor's confirm card now
-//      shows a prominent "Outline not covering your whole roof? Adjust
-//      it." prompt with a bordered peer-weight button -- asserted on the
-//      same mocked found:true confirm card as item 6, and the outline
-//      editor there now renders 6 points (sw, w-mid, nw, ne, e-mid, se),
-//      asserted by count before the drag. A dedicated fresh-context check
-//      mocks a {found:false, reason:"no-solar-data"}
-//      response WITH imagery/seedCorners at both widths, and asserts the
-//      trace-the-roof editor renders (heading, body copy, all 6 seeded
-//      points, the small manual-entry escape hatch) and that "Use this
-//      outline" actually advances the wizard.
+//   6. The home step's address entry degrades silently to a plain input in
+//      preview (no live /api/address-suggest) -- asserted on both the
+//      mobile fill and the 1280 fresh-load pass (no dropdown ever renders,
+//      no console/page error). The address chip (current address +
+//      "Change") is asserted visible on every step past the address entry
+//      state, including Home itself once the address is set (feedback
+//      round 8: the chip is now rendered inline on Home too). Since
+//      preview also has no live /api/measure, the satellite confirm card
+//      (amber accuracy notice, "Adjust outline") is otherwise unreachable
+//      -- a dedicated fresh-context check mocks /api/measure (found:true +
+//      mapMeta) at both widths to screenshot it directly, and also drives
+//      a real pointer drag on one of the outline editor's points.
+//   7. The outline editor's confirm card shows a prominent "Outline not
+//      covering your whole roof? Adjust it." prompt with a bordered
+//      peer-weight button -- asserted on the same mocked found:true
+//      confirm card as item 6, and the outline editor there renders 6
+//      points (sw, w-mid, nw, ne, e-mid, se), asserted by count before the
+//      drag. A dedicated fresh-context check mocks a
+//      {found:false, reason:"no-solar-data"} response WITH imagery/
+//      seedCorners at both widths, and asserts the trace-the-roof editor
+//      renders (heading, body copy, all 6 seeded points, the small
+//      manual-entry escape hatch) and that "Use this outline" commits the
+//      outline WITHOUT navigating away (the solar question appears next,
+//      on the same step), then that answering it and pressing Continue
+//      actually advances the wizard.
 //
-// Screenshots every /build step at 390x844 and 1280x800 (plus one extra:
-// the shingle step mid-selection on mobile, the mocked satellite confirm
-// card with the amber notice, and the mocked trace-mode editor, at both
-// widths), every /next step at both widths (plus the partner step's
-// documents section separately at both widths), the landing/about pages at
-// both widths, and the /metal page at both widths (plus the open lightbox
-// at 1280x800), all into .superpowers/sdd/screens/.
+// Screenshots every /build step at 390x844 and 1280x800 (plus the home
+// step mid-measurement and post-solar-answer, and the shingle step
+// mid-selection, on mobile), every /next step at both widths (plus the
+// partner step's documents section separately at both widths), the
+// landing/about pages at both widths, and the /metal page at both widths
+// (plus the open lightbox at 1280x800), all into .superpowers/sdd/screens/.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -83,16 +86,15 @@ const SCREENS_DIR = path.join(REPO_ROOT, '.superpowers', 'sdd', 'screens');
 const PORT = 4173;
 const BASE_URL = `http://localhost:${PORT}`;
 
+// Feedback round 8: the 9-step flow collapsed to 5 -- address is absorbed
+// into Home, color+finishing merge into Appearance, underlayment and
+// protection are gone.
 const STEPS = [
-  { n: 1, id: 'address' },
-  { n: 2, id: 'home' },
-  { n: 3, id: 'shingle' },
-  { n: 4, id: 'color' },
-  { n: 5, id: 'underlayment' },
-  { n: 6, id: 'protection' },
-  { n: 7, id: 'included' },
-  { n: 8, id: 'finishing' },
-  { n: 9, id: 'review' },
+  { n: 1, id: 'home' },
+  { n: 2, id: 'shingle' },
+  { n: 3, id: 'appearance' },
+  { n: 4, id: 'included' },
+  { n: 5, id: 'review' },
 ];
 
 const NEXT_STEPS = ['partner', 'info', 'schedule', 'confirm'];
@@ -161,6 +163,9 @@ async function screenshotNamed(page, name, width) {
 
 // Local-date arithmetic (no UTC shifting): mirrors StepSchedule's own
 // `toISODate` so the test picks a date the component will actually accept.
+// +7 exactly satisfies BOTH the pre-Commit-3 rule ("at least 7 days from
+// today") and the post-Commit-3 rule ("tomorrow through today+7
+// inclusive") -- deliberately, so this script stays green across both.
 function isoDatePlusDays(days) {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -206,9 +211,9 @@ async function assertColdLoadTop(page, label) {
   console.log(`  [${label}] cold load OK: scrollY=0, header + heading in viewport`);
 }
 
-// Deliberate step flow: selecting a card must never itself navigate. After
-// a selection click, wait a beat (long enough to have caught the old
-// ~420ms auto-advance timer) and assert the step hasn't changed -- only an
+// Deliberate step flow: selecting a card (or committing a measurement, or
+// answering the solar question) must never itself navigate. After the
+// action, wait a beat and assert the step hasn't changed -- only an
 // explicit [Continue] tap may advance.
 async function assertStillOnStep(page, stepId, label, waitMs = 600) {
   await page.waitForTimeout(waitMs);
@@ -227,11 +232,11 @@ async function assertNoPriceHero(page, label) {
   console.log(`  [${label}] PriceHero correctly absent (no shingle selected yet)`);
 }
 
-// Plan 4 Task 3: the home step's satellite measurement call has no live API
-// in preview (returns available:false, or errors/404s entirely once the
-// gate has no /api/* deploy behind it). Every one of those outcomes must
-// fall back to the plain manual footprint form silently -- no spinner stuck
-// forever, no error banner, no "couldn't measure" text anywhere on the step.
+// The home step's satellite measurement call has no live API in preview
+// (returns available:false, or errors/404s entirely once the gate has no
+// /api/* deploy behind it). Every one of those outcomes must fall back to
+// the plain manual footprint form silently -- no spinner stuck forever, no
+// error banner, no "couldn't measure" text anywhere on the step.
 async function assertNoMeasurementErrorUI(page, label) {
   const homeStep = page.locator('[data-testid="build-step"][data-step="home"]');
   // Preview has no live /api/measure (available:false, a 404, or a network
@@ -250,11 +255,10 @@ async function assertNoMeasurementErrorUI(page, label) {
   console.log(`  [${label}] no measurement error/loading UI visible; manual form present`);
 }
 
-// Feedback round 5: preview has no live /api/address-suggest either (same
-// as /api/measure above) -- AddressCombobox must degrade silently to a
-// plain, fully usable text input with no dropdown ever rendered and no
-// console/page error surfaced, exactly like StepHome's satellite fallback
-// above.
+// preview has no live /api/address-suggest either (same as /api/measure
+// above) -- AddressCombobox must degrade silently to a plain, fully usable
+// text input with no dropdown ever rendered and no console/page error
+// surfaced, exactly like StepHome's satellite fallback above.
 async function assertNoAddressDropdownError(page, label) {
   const listboxCount = await page.locator('[role="listbox"]').count();
   if (listboxCount !== 0) {
@@ -269,8 +273,9 @@ function assertNoConsoleErrors(consoleErrors, label) {
   }
 }
 
-// Feedback round 5: the compact address chip (current address + "Change")
-// must be visible under the step rail on every /build step past address.
+// The compact address chip (current address + "Change") must be visible on
+// every /build step once an address is set -- including Home itself
+// (feedback round 8: Home now renders it inline once past address entry).
 async function assertAddressChip(page, label, expectedAddress) {
   const chip = page.locator('[data-testid="address-chip"]');
   await chip.waitFor({ timeout: 2000 });
@@ -292,17 +297,17 @@ async function assertReviewPrice(page, label) {
   console.log(`  [${label}] verified $14,400 and $144/month on review page`);
 }
 
-// Color step (Task: real swatches): the grid must render actual <img>
-// swatches (real photos), not the old colored-div hex chips.
+// Appearance step (color half): the grid must render actual <img> swatches
+// (real photos), not the old colored-div hex chips.
 async function assertColorSwatchGrid(page, label) {
-  const imgCount = await page.locator('[data-testid="build-step"][data-step="color"] img').count();
+  const imgCount = await page.locator('[data-testid="build-step"][data-step="appearance"] img').count();
   if (imgCount < 10) {
-    fail(`[${label}] expected an <img> swatch grid on the color step, found ${imgCount} <img> element(s)`);
+    fail(`[${label}] expected an <img> swatch grid on the appearance step, found ${imgCount} <img> element(s)`);
   }
   console.log(`  [${label}] swatch grid renders ${imgCount} <img> elements (not colored divs)`);
 }
 
-// Color step: the description panel below the grid must update to name the
+// Appearance step: the description panel must update to name the
 // just-selected color.
 async function assertColorDescription(page, label, expectedColorName) {
   const name = page.locator('[data-testid="color-description-name"]');
@@ -326,27 +331,23 @@ async function assertConfirmation(page, label, expectedDateText) {
 }
 
 // Reproduces the reported bug directly: a brand new context (so localStorage
-// is empty -- lands on #address) loading a URL that already contains the
-// #address fragment, exactly like a bookmark, shared link, or reload would.
-async function checkColdAddressLoad(browser, width, height) {
+// is empty -- lands on #home) loading a URL that already contains the
+// #home fragment, exactly like a bookmark, shared link, or reload would.
+async function checkColdHomeLoad(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto(`${BASE_URL}/build#address`);
-  await waitForStep(page, 'address');
-  await assertColdLoadTop(page, `cold /build#address @ ${width}x${height}`);
+  await page.goto(`${BASE_URL}/build#home`);
+  await waitForStep(page, 'home');
+  await assertColdLoadTop(page, `cold /build#home @ ${width}x${height}`);
   await context.close();
 }
 
 // Fresh context per width (no earned config from the main wizard walk):
 // verifies the landing page's single address input stores the address and
-// navigates to /build landing on the home-size step (address already
-// satisfied), not the address step. Also screenshots landing and About.
-//
-// Feedback round 4: before the happy-path fill, also proves the new
-// full-address validation actually gates the form -- submitting an address
-// with no ZIP must show the ZIP error inline and must NOT navigate away
-// from the landing page.
+// navigates to /build landing on the home step (address entry already
+// satisfied), not a separate address step. Also screenshots landing and
+// About.
 async function checkLandingAndAbout(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
@@ -439,13 +440,12 @@ async function checkMetal(browser, width, height) {
 const BLANK_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
-// Feedback round 5, Task B item 2/4: preview has no live /api/measure, so
-// the main happy-path walk above only ever exercises the manual-fallback
-// form -- the satellite confirm card (amber accuracy notice, "Adjust
-// outline" entry point) is otherwise unreachable in this environment.
-// Mocks /api/measure with a `found:true` response (mapMeta + imageUrl
-// included) on a fresh, isolated context so that card can actually be
-// screenshotted, at both widths.
+// preview has no live /api/measure, so the main happy-path walk above only
+// ever exercises the manual-fallback form -- the satellite confirm card
+// (amber accuracy notice, "Adjust outline" entry point) is otherwise
+// unreachable in this environment. Mocks /api/measure with a `found:true`
+// response (mapMeta + imageUrl included) on a fresh, isolated context so
+// that card can actually be screenshotted, at both widths.
 async function checkSatelliteConfirmAmberNotice(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
@@ -477,11 +477,10 @@ async function checkSatelliteConfirmAmberNotice(browser, width, height) {
   );
 
   await page.goto(`${BASE_URL}/build`);
-  await waitForStep(page, 'address');
+  await waitForStep(page, 'home');
   await page.getByLabel('Property address').fill('1530 Main St, Sarasota, FL 34236');
   await page.getByRole('button', { name: 'Build My Roof' }).click();
 
-  await waitForStep(page, 'home');
   await page.getByText('We found your roof.').waitFor({ timeout: 5000 });
 
   const amberNotice = page.getByText(
@@ -491,10 +490,9 @@ async function checkSatelliteConfirmAmberNotice(browser, width, height) {
   await page.getByRole('button', { name: 'Adjust outline' }).waitFor({ timeout: 2000 });
   console.log(`  [satellite confirm @ ${width}x${height}] amber accuracy notice + Adjust outline both visible`);
 
-  // Feedback round 7 (Task C item 3): "Adjust outline" must read as a real
-  // peer action, not a quiet ghost link -- Kyle's reported bug. Asserts the
-  // prompt text renders, and that the button itself has real visual weight
-  // (a solid navy border), not the old quiet pill style.
+  // "Adjust outline" must read as a real peer action, not a quiet ghost
+  // link. Asserts the prompt text renders, and that the button itself has
+  // real visual weight (a solid navy border), not a quiet pill style.
   await page
     .getByText('Outline not covering your whole roof?')
     .waitFor({ timeout: 2000 });
@@ -506,6 +504,12 @@ async function checkSatelliteConfirmAmberNotice(browser, width, height) {
     );
   }
   console.log(`  [satellite confirm @ ${width}x${height}] "Adjust it." prompt + prominent Adjust outline button verified`);
+
+  // Feedback round 8: confirming here must NOT navigate away -- it commits
+  // the outline and reveals the solar question below, on the same step.
+  await page.getByRole('button', { name: 'Looks right, continue' }).click();
+  await page.getByText('Do you have solar panels on your roof?').waitFor({ timeout: 2000 });
+  await assertStillOnStep(page, 'home', `satellite confirm @ ${width}x${height}: confirming stays on Home`);
 
   // The mocked aerial image pushes the notice below the fold on shorter
   // viewports -- scroll it into view so the screenshot actually shows the
@@ -529,13 +533,10 @@ const HOME_MAP_META = {
 // Feedback round 6: the reported bug was that adjusting the outline updated
 // the footprint number but the confirm card kept showing the ORIGINAL
 // rectangle. Drives a REAL pointer drag on one of the adjust-outline
-// editor's handles via Playwright's mouse API (a real browser has a real
-// PointerEvent, unlike jsdom, which has none at all -- that's why this
-// lives here rather than only in a component test), applies it, and
-// screenshots the confirm card showing the outline has actually changed.
-// Feedback round 7 (Task C item 4): the editor moved from 4 corners to 6
-// (sw, w-mid, nw, ne, e-mid, se) -- asserts all 6 render, then drags one of
-// them (see the corner-0 comment below for why a CORNER, not a midpoint).
+// editor's handles via Playwright's mouse API, applies it, and screenshots
+// the confirm card showing the outline has actually changed. The editor
+// renders 6 corners (sw, w-mid, nw, ne, e-mid, se) -- asserts all 6 render,
+// then drags one of them.
 async function checkAdjustedOutlineOverlay(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
@@ -559,11 +560,10 @@ async function checkAdjustedOutlineOverlay(browser, width, height) {
   );
 
   await page.goto(`${BASE_URL}/build`);
-  await waitForStep(page, 'address');
+  await waitForStep(page, 'home');
   await page.getByLabel('Property address').fill('1530 Main St, Sarasota, FL 34236');
   await page.getByRole('button', { name: 'Build My Roof' }).click();
 
-  await waitForStep(page, 'home');
   await page.getByText('We found your roof.').waitFor({ timeout: 5000 });
   const originalPolygonPoints = await page.locator('svg polygon').getAttribute('points');
 
@@ -576,26 +576,18 @@ async function checkAdjustedOutlineOverlay(browser, width, height) {
     fail(`[adjusted overlay @ ${width}x${height}] expected 6 outline handles, found ${handleCount}`);
   }
 
-  // Drags the sw corner (index 0, same role/offset the pre-round-7 version
-  // of this check used) -- this real captured mapMeta's building footprint
-  // is narrow east-west (the west/east edges, where w-mid/e-mid now sit,
-  // are only a few dozen CSS px apart at this container width), so a drag
-  // sized to comfortably clear both guards on a CORNER would send a
-  // MIDPOINT straight across to the opposite edge. Midpoint-specific
-  // dragging (tracing an L) is exercised precisely, against controlled
-  // fixtures, by RoofOutlineEditor.test.tsx and StepHome.test.tsx instead.
+  // Drags the sw corner (index 0) -- this real captured mapMeta's building
+  // footprint is narrow east-west, so a drag sized to comfortably clear
+  // both guards on a CORNER would send a MIDPOINT straight across to the
+  // opposite edge. Midpoint-specific dragging is exercised precisely,
+  // against controlled fixtures, by RoofOutlineEditor.test.tsx and
+  // StepHome.test.tsx instead.
   const handle = page.getByTestId('roof-outline-corner-0');
   const box = await handle.boundingBox();
   if (!box) fail(`[adjusted overlay @ ${width}x${height}] could not locate corner handle 0's bounding box`);
 
   const startX = box.x + box.width / 2;
   const startY = box.y + box.height / 2;
-  // A modest inward drag -- big enough to visibly change the outline and
-  // the sq ft readout, comfortably clear of both the out-of-range guard
-  // and the self-intersection guard that disable "Use this outline"
-  // (RoofOutlineEditor.test.tsx's own fixtures need far more extreme drags
-  // to trip either; this is one corner, moved a small fraction of the
-  // frame).
   const endX = startX + 40;
   const endY = startY + 30;
 
@@ -611,6 +603,8 @@ async function checkAdjustedOutlineOverlay(browser, width, height) {
   await applyButton.click();
 
   await page.getByText('We found your roof.').waitFor({ timeout: 5000 });
+  // Feedback round 8: applying stays on Home -- no navigation.
+  await assertStillOnStep(page, 'home', `adjusted overlay @ ${width}x${height}: applying stays on Home`);
   const polygon = page.locator('svg polygon');
   await polygon.waitFor({ timeout: 2000 });
   const adjustedPolygonPoints = await polygon.getAttribute('points');
@@ -628,9 +622,8 @@ async function checkAdjustedOutlineOverlay(browser, width, height) {
 }
 
 // Same bbox as HOME_MAP_META above, but expressed as the no-solar-data
-// response's own seedCorners (feedback round 7, Task B item 2/Task C item
-// 4): sw, w-mid, nw, ne, e-mid, se -- the 4 rectangle corners plus the
-// midpoints of the west/east edges.
+// response's own seedCorners: sw, w-mid, nw, ne, e-mid, se -- the 4
+// rectangle corners plus the midpoints of the west/east edges.
 const SEED_MAP_META = HOME_MAP_META;
 const SEED_CORNERS = [
   { lat: 27.3360897, lng: -82.5400199 }, // sw
@@ -641,13 +634,14 @@ const SEED_CORNERS = [
   { lat: 27.3360897, lng: -82.5399321 }, // se
 ];
 
-// Feedback round 7 (Task C items 2 and 7): the no-solar-data trace flow.
-// Mocks /api/measure returning {found:false, reason:"no-solar-data"} WITH
-// imagery/mapMeta/seedCorners, and asserts the trace editor renders instead
-// of the old manual dead-end: the "Draw your roof outline" heading, the
-// body copy, all 6 seeded points, and the small manual-entry escape hatch
-// -- then drives "Use this outline" and confirms it actually advances the
-// wizard past the home step.
+// The no-solar-data trace flow. Mocks /api/measure returning
+// {found:false, reason:"no-solar-data"} WITH imagery/mapMeta/seedCorners,
+// and asserts the trace editor renders instead of the old manual dead-end:
+// the "Draw your roof outline" heading, the body copy, all 6 seeded
+// points, and the small manual-entry escape hatch -- then drives "Use this
+// outline" and confirms it commits WITHOUT navigating (feedback round 8:
+// the solar question appears next, on the same step), then that answering
+// it and pressing Continue actually advances the wizard.
 async function checkTraceMode(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
@@ -673,11 +667,10 @@ async function checkTraceMode(browser, width, height) {
   );
 
   await page.goto(`${BASE_URL}/build`);
-  await waitForStep(page, 'address');
+  await waitForStep(page, 'home');
   await page.getByLabel('Property address').fill('1530 Main St, Sarasota, FL 34236');
   await page.getByRole('button', { name: 'Build My Roof' }).click();
 
-  await waitForStep(page, 'home');
   await page.getByText('Draw your roof outline').waitFor({ timeout: 5000 });
   await page
     .getByText('We could not measure this roof automatically. Drag the points so the outline covers your roof.')
@@ -695,8 +688,14 @@ async function checkTraceMode(browser, width, height) {
   await screenshotNamed(page, 'home-trace', width);
 
   await page.getByRole('button', { name: 'Use this outline' }).click();
+  await page.getByText('Do you have solar panels on your roof?').waitFor({ timeout: 2000 });
+  await assertStillOnStep(page, 'home', `trace mode @ ${width}x${height}: using the outline stays on Home`);
+  console.log(`  [trace mode @ ${width}x${height}] "Use this outline" commits without navigating`);
+
+  await page.getByRole('button', { name: 'No solar panels' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
   await waitForStep(page, 'shingle');
-  console.log(`  [trace mode @ ${width}x${height}] "Use this outline" advances the wizard past the home step`);
+  console.log(`  [trace mode @ ${width}x${height}] answering solar + Continue advances the wizard past Home`);
 
   await context.close();
 }
@@ -724,9 +723,9 @@ async function main() {
     browser = await chromium.launch();
 
     // --- Step 0: cold-load regression check, both widths, fresh storage ---
-    console.log('\nCold-load check (fresh #address, empty storage)...');
-    await checkColdAddressLoad(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
-    await checkColdAddressLoad(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
+    console.log('\nCold-load check (fresh #home, empty storage)...');
+    await checkColdHomeLoad(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
+    await checkColdHomeLoad(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
     const context = await browser.newContext({ viewport: VIEWPORTS[0] });
     await context.clearCookies();
@@ -735,15 +734,15 @@ async function main() {
     // under prefers-reduced-motion instead of mid-transition/mid-stagger).
     await page.emulateMedia({ reducedMotion: 'reduce' });
 
-    // Feedback round 5: preview has no live /api/address-suggest (nor
-    // /api/measure), so those two fetches will fail/404 -- track
-    // console/page errors so a regression that surfaces as a thrown JS
-    // error (rather than being silently swallowed, as the relevant catch
-    // blocks are supposed to do) actually fails the run. The browser
-    // itself always logs a "Failed to load resource: 404" console error
-    // for a failed network request regardless of whether application code
-    // handled it -- expected noise for exactly those two known-absent-in-
-    // preview endpoints, so it's filtered out ONLY for them (verified via
+    // preview has no live /api/address-suggest (nor /api/measure), so those
+    // two fetches will fail/404 -- track console/page errors so a
+    // regression that surfaces as a thrown JS error (rather than being
+    // silently swallowed, as the relevant catch blocks are supposed to do)
+    // actually fails the run. The browser itself always logs a
+    // "Failed to load resource: 404" console error for a failed network
+    // request regardless of whether application code handled it --
+    // expected noise for exactly those two known-absent-in-preview
+    // endpoints, so it's filtered out ONLY for them (verified via
     // msg.location().url, not the message text, so it can't accidentally
     // swallow a "Failed to load resource" for anything else, e.g. a real
     // asset 404 that would be a genuine bug).
@@ -766,81 +765,70 @@ async function main() {
     // --- Mobile pass: drive the happy path, screenshotting on arrival ---
     console.log('\nMobile pass (390x844): walking the happy path...');
 
-    await waitForStep(page, 'address');
+    await waitForStep(page, 'home');
     await assertColdLoadTop(page, '390 mobile pass: bare /build cold load');
-    await assertNoPriceHero(page, '390 address');
+    await assertNoPriceHero(page, '390 home (address entry)');
     await page.getByLabel('Property address').fill('123 Palm Ave, Tampa, FL 33602');
     // Debounce (250ms) + a failed fetch round-trip to a domain with no live
     // suggest API -- give it time to settle before asserting the dropdown
-    // never appeared, then screenshot the address step with the address
+    // never appeared, then screenshot the home step with the address
     // filled in and the plain-input degrade path confirmed.
     await page.waitForTimeout(600);
-    await assertNoAddressDropdownError(page, '390 address');
-    assertNoConsoleErrors(consoleErrors, '390 address');
+    await assertNoAddressDropdownError(page, '390 home (address entry)');
+    assertNoConsoleErrors(consoleErrors, '390 home (address entry)');
     await screenshotStep(page, STEPS[0], 390);
     await page.getByRole('button', { name: 'Build My Roof' }).click();
 
-    await waitForStep(page, 'home');
-    await assertNoPriceHero(page, '390 home');
-    await assertAddressChip(page, '390 home', '123 Palm Ave, Tampa, FL 33602');
-    await assertNoMeasurementErrorUI(page, '390 home');
+    // Still the SAME step (home) -- address absorbed it, no route change.
+    await assertNoPriceHero(page, '390 home (measuring)');
+    await assertAddressChip(page, '390 home (measuring)', '123 Palm Ave, Tampa, FL 33602');
+    await assertNoMeasurementErrorUI(page, '390 home (measuring)');
     await page.getByLabel('Home footprint (sq ft)').fill('2000');
     await page.getByText("Got it. We've sized your roof.").waitFor();
-    // Screenshot after the "Got it" confirmation appears, not the empty
-    // default state, so the no-per-SQ confirmation moment is verifiable.
-    // This fill also flips Continue disabled -> enabled; wait for its color
-    // transition to settle first so the capture doesn't show it mid-flip.
     await page.waitForTimeout(BUTTON_TRANSITION_SETTLE_MS);
-    await screenshotStep(page, STEPS[1], 390);
+    await screenshotStep(page, STEPS[0], 390, '-measured');
+    await page.getByRole('button', { name: 'Use this footprint' }).click();
+
+    // Confirming/using the footprint must not navigate -- the solar
+    // question appears below, still on Home.
+    await page.getByText('Do you have solar panels on your roof?').waitFor({ timeout: 2000 });
+    await assertStillOnStep(page, 'home', '390 home: committing the footprint');
+    await page.getByRole('button', { name: 'No solar panels' }).click();
+    await page.waitForTimeout(BUTTON_TRANSITION_SETTLE_MS);
+    await screenshotStep(page, STEPS[0], 390, '-solar');
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await waitForStep(page, 'shingle');
     await assertAddressChip(page, '390 shingle', '123 Palm Ave, Tampa, FL 33602');
-    await screenshotStep(page, STEPS[2], 390);
+    await screenshotStep(page, STEPS[1], 390);
     const titanCard = page.getByText('TAMKO Titan XT');
     await titanCard.click();
     // Selecting only selects: highlight + price update, no navigation.
-    // Extra screenshot: capture the selected (blue-fill + check) TAMKO card,
-    // description still readable, well past where the old ~420ms
-    // auto-advance would have already navigated to Color. The selection also
-    // flips Continue disabled -> enabled; wait for that transition to settle
-    // first so the capture doesn't show it mid-flip.
     await titanCard.scrollIntoViewIfNeeded();
     await page.waitForTimeout(BUTTON_TRANSITION_SETTLE_MS);
-    await screenshotStep(page, STEPS[2], 390, '-selected');
+    await screenshotStep(page, STEPS[1], 390, '-selected');
     await assertStillOnStep(page, 'shingle', '390 shingle: card selection');
     await page.getByRole('button', { name: 'Continue' }).click();
 
-    await waitForStep(page, 'color');
-    await assertColorSwatchGrid(page, '390 color');
-    await screenshotStep(page, STEPS[3], 390);
+    await waitForStep(page, 'appearance');
+    await assertColorSwatchGrid(page, '390 appearance');
+    await screenshotStep(page, STEPS[2], 390);
     await page.getByRole('button', { name: 'Rustic Black', exact: true }).click();
-    await assertColorDescription(page, '390 color', 'Rustic Black');
-    await assertStillOnStep(page, 'color', '390 color: swatch selection');
-    await page.getByRole('button', { name: 'Continue' }).click();
-
-    await waitForStep(page, 'underlayment');
-    await screenshotStep(page, STEPS[4], 390);
-    await page.getByText('Full Peel & Stick').click();
-    await assertStillOnStep(page, 'underlayment', '390 underlayment: card selection');
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await waitForStep(page, 'protection');
-
-    await screenshotStep(page, STEPS[5], 390);
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await waitForStep(page, 'included');
-
-    await screenshotStep(page, STEPS[6], 390);
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await waitForStep(page, 'finishing');
-
-    await screenshotStep(page, STEPS[7], 390);
+    await assertColorDescription(page, '390 appearance', 'Rustic Black');
+    await assertStillOnStep(page, 'appearance', '390 appearance: swatch selection');
     await page.getByRole('button', { name: 'Black', exact: true }).click();
-    await assertStillOnStep(page, 'finishing', '390 finishing: drip edge selection');
+    await assertStillOnStep(page, 'appearance', '390 appearance: drip edge selection');
     await page.getByRole('button', { name: 'Continue' }).click();
-    await waitForStep(page, 'review');
 
-    await screenshotStep(page, STEPS[8], 390);
+    await waitForStep(page, 'included');
+    await screenshotStep(page, STEPS[3], 390);
+    await page.getByRole('button', { name: 'Why not synthetic?' }).click();
+    await page.getByText(/self-adhered directly to your decking/i).waitFor({ timeout: 2000 });
+    await assertStillOnStep(page, 'included', '390 included: why-not-synthetic expand');
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    await waitForStep(page, 'review');
+    await screenshotStep(page, STEPS[4], 390);
     await assertReviewPrice(page, '390 mobile');
 
     // --- Desktop pass: state + progress already earned from the mobile
@@ -856,26 +844,25 @@ async function main() {
         waitUntil: 'domcontentloaded',
       });
       await waitForStep(page, step.id);
-      if (step.id === 'address') {
-        await assertColdLoadTop(page, '1280 desktop pass: fresh #address load');
-        // Prefilled from localStorage on this fresh load -- the combobox's
-        // fetch effect fires on mount too; let its (failed, no live suggest
-        // API in preview) round-trip settle before screenshotting so the
-        // capture reliably shows the closed, plain-input degrade state.
+      if (step.id === 'home') {
+        await assertColdLoadTop(page, '1280 desktop pass: fresh #home load');
+        // Address/sq/solar already earned -- home renders its resolved
+        // summary (manual form's leak guard: blank, not prefilled) plus
+        // the already-answered solar question, not the entry form. Its
+        // own fetch/degrade effects still fire on mount; let them settle
+        // before screenshotting so the capture is deterministic.
         await page.waitForTimeout(600);
-        await assertNoAddressDropdownError(page, '1280 address');
-        assertNoConsoleErrors(consoleErrors, '1280 address');
+        await assertNoAddressDropdownError(page, '1280 home');
+        assertNoConsoleErrors(consoleErrors, '1280 home');
       }
-      if (step.id === 'shingle') {
-        await assertAddressChip(page, '1280 shingle', '123 Palm Ave, Tampa, FL 33602');
-      }
+      await assertAddressChip(page, `1280 ${step.id}`, '123 Palm Ave, Tampa, FL 33602');
       await screenshotStep(page, step, 1280);
     }
     await assertReviewPrice(page, '1280 desktop (fresh loads)');
 
-    // --- Step rail navigation (item 3): earned steps are directly
-    //     clickable from the desktop rail, not just reachable via URL hash.
-    //     Jump back to an earlier earned step and forward again. ---
+    // --- Step rail navigation: earned steps are directly clickable from
+    //     the desktop rail, not just reachable via URL hash. Jump back to
+    //     an earlier earned step and forward again. ---
     console.log('\nStep rail (1280x800): earned steps are directly clickable...');
     await page.getByRole('button', { name: 'Go to Shingle step' }).click();
     await waitForStep(page, 'shingle');
@@ -906,7 +893,7 @@ async function main() {
 
     await waitForNextStep(page, 'schedule');
     await screenshotNamed(page, 'next-schedule', 1280);
-    const visitDateISO = isoDatePlusDays(10); // safely more than the 7-day minimum
+    const visitDateISO = isoDatePlusDays(7);
     await page.locator('#visit-date').fill(visitDateISO);
     await page.getByText('Morning', { exact: true }).click();
     await page.getByRole('button', { name: 'Schedule My Visit' }).click();
@@ -932,20 +919,20 @@ async function main() {
     }
     await assertConfirmation(page, '390 confirmation (fresh load)', expectedVisitDateText);
 
-    // --- Start over (item 4b): a completed quote's confirmation page can
-    //     reset straight away, no confirm step (the quote is already done).
-    //     Lands back on a pristine /build#address: empty input, no price. ---
+    // --- Start over: a completed quote's confirmation page can reset
+    //     straight away, no confirm step (the quote is already done).
+    //     Lands back on a pristine /build#home: empty input, no price. ---
     console.log('\nStart over (390x844): START A NEW QUOTE from confirmation...');
     await page.getByRole('button', { name: 'Start a New Quote' }).scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: 'Start a New Quote' }).click();
-    await waitForStep(page, 'address');
+    await waitForStep(page, 'home');
 
     const addressValueAfterReset = await page.getByLabel('Property address').inputValue();
     if (addressValueAfterReset !== '') {
       fail(`[start-over] expected an empty address input after Start a New Quote, got "${addressValueAfterReset}"`);
     }
-    await assertNoPriceHero(page, 'start-over: back at address step');
-    console.log('  [start-over] confirmed: back at address step, empty input, no price hero');
+    await assertNoPriceHero(page, 'start-over: back at home step');
+    console.log('  [start-over] confirmed: back at home step (address entry), empty input, no price hero');
 
     // --- Landing + About: fresh contexts (no earned config), both widths ---
     console.log('\nLanding + About: fresh-context address prefill and screenshots...');
@@ -965,15 +952,15 @@ async function main() {
     await checkSatelliteConfirmAmberNotice(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
     await checkSatelliteConfirmAmberNotice(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
-    // --- Feedback round 6: drive a real drag on the adjust-outline editor
-    //     and prove the confirm card's overlay actually changes. Feedback
-    //     round 7: now over 6 points instead of 4. ---
+    // --- Drive a real drag on the adjust-outline editor and prove the
+    //     confirm card's overlay actually changes, and that applying it
+    //     does not navigate away from Home. ---
     console.log('\nAdjusted roof outline: real pointer drag, confirm card overlay changes...');
     await checkAdjustedOutlineOverlay(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
     await checkAdjustedOutlineOverlay(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);
 
-    // --- Feedback round 7: the no-solar-data trace flow replaces the old
-    //     manual dead-end whenever there's imagery to trace from. ---
+    // --- The no-solar-data trace flow replaces the old manual dead-end
+    //     whenever there's imagery to trace from. ---
     console.log('\nTrace mode: no-solar-data response with imagery (mocked /api/measure)...');
     await checkTraceMode(browser, VIEWPORTS[0].width, VIEWPORTS[0].height);
     await checkTraceMode(browser, VIEWPORTS[1].width, VIEWPORTS[1].height);

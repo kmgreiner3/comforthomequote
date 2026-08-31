@@ -7,6 +7,11 @@ const bedrock = new BedrockRuntimeClient({});
 const MASK_PROMPT = 'the roof of the house';
 const NEGATIVE_TEXT = 'text, watermark, distorted architecture, altered windows, altered walls, altered sky';
 
+// Feedback round 8, item 17: an optional drip edge color the render prompt
+// should mention. Validated by the handler; this module just renders it
+// into text when present.
+export type DripEdgeColor = 'White' | 'Black' | 'Brown';
+
 export interface NovaCanvasInpaintingRequest {
   taskType: 'INPAINTING';
   inPaintingParams: {
@@ -25,9 +30,10 @@ export interface NovaCanvasInpaintingRequest {
 // Task 0 prompt builder, shared by the spike and the generate handler.
 // Site rule: no em dashes anywhere, so any stray one in source copy is
 // stripped as a safety net rather than trusted to already be clean.
-export function buildVisualizePrompt(colorName: string, description: string): string {
+export function buildVisualizePrompt(colorName: string, description: string, dripEdge?: DripEdgeColor): string {
   const firstSentence = (description.split('.')[0] ?? '').trim().toLowerCase();
-  const prompt = `architectural asphalt shingle roof in ${colorName}: ${firstSentence}, photorealistic, keep the rest of the house unchanged`;
+  let prompt = `architectural asphalt shingle roof in ${colorName}: ${firstSentence}, photorealistic, keep the rest of the house unchanged`;
+  if (dripEdge) prompt += `, with ${dripEdge} drip edge trim`;
   return prompt.replace(/--|—/g, ',');
 }
 
@@ -36,13 +42,14 @@ export function buildInPaintingRequest(
   imageBase64: string,
   colorName: string,
   description: string,
+  dripEdge?: DripEdgeColor,
 ): NovaCanvasInpaintingRequest {
   return {
     taskType: 'INPAINTING',
     inPaintingParams: {
       image: imageBase64,
       maskPrompt: MASK_PROMPT,
-      text: buildVisualizePrompt(colorName, description),
+      text: buildVisualizePrompt(colorName, description, dripEdge),
       negativeText: NEGATIVE_TEXT,
     },
     imageGenerationConfig: {
@@ -64,8 +71,9 @@ export async function generateRoofImage(
   imageBase64: string,
   colorName: string,
   description: string,
+  dripEdge?: DripEdgeColor,
 ): Promise<string> {
-  const request = buildInPaintingRequest(imageBase64, colorName, description);
+  const request = buildInPaintingRequest(imageBase64, colorName, description, dripEdge);
   const response = await bedrock.send(
     new InvokeModelCommand({
       modelId,

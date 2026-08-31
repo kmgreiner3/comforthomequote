@@ -113,6 +113,55 @@ describe('vizGenerate handler', () => {
     expect(sentPrompt.inPaintingParams.text).toContain('Rustic Black');
   });
 
+  it('feedback round 8: 400s on an invalid dripEdge value', async () => {
+    const res = await handler(eventFor(validBody({ dripEdge: 'Green' })));
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body as string)).toEqual({ error: 'invalid dripEdge' });
+  });
+
+  it('accepts a request with no dripEdge at all (optional, unchanged behavior)', async () => {
+    s3Mock.on(HeadObjectCommand).resolves({});
+    const res = await handler(eventFor(validBody()));
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('on a cache miss with a valid dripEdge, the prompt sent to Nova Canvas mentions the drip edge trim', async () => {
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    s3Mock.on(GetObjectCommand).resolves({ Body: Buffer.from('fake-source-bytes') as never });
+    s3Mock.on(PutObjectCommand).resolves({});
+    bedrockMock.on(InvokeModelCommand).resolves({
+      body: (new TextEncoder().encode(JSON.stringify({ images: ['rendered-base64'] })) as never),
+    });
+
+    const res = await handler(eventFor(validBody({ dripEdge: 'White' })));
+
+    expect(res.statusCode).toBe(200);
+    const invokeCall = bedrockMock.commandCalls(InvokeModelCommand)[0];
+    const sentPrompt = JSON.parse(String(invokeCall?.args[0].input.body)) as {
+      inPaintingParams: { text: string };
+    };
+    expect(sentPrompt.inPaintingParams.text).toContain('with White drip edge trim');
+  });
+
+  it('feedback round 8: the render cache key differs by dripEdge, so a render without one is never served for a request WITH one', async () => {
+    s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
+    s3Mock.on(GetObjectCommand).resolves({ Body: Buffer.from('fake-source-bytes') as never });
+    s3Mock.on(PutObjectCommand).resolves({});
+    bedrockMock.on(InvokeModelCommand).resolves({
+      body: (new TextEncoder().encode(JSON.stringify({ images: ['rendered-base64'] })) as never),
+    });
+
+    await handler(eventFor(validBody()));
+    await handler(eventFor(validBody({ dripEdge: 'Black' })));
+
+    const putCalls = s3Mock.commandCalls(PutObjectCommand);
+    expect(putCalls).toHaveLength(2);
+    const keys = putCalls.map((c) => c.args[0].input.Key);
+    expect(keys[0]).toBe(`renders/${UPLOAD_ID}/tamko-titan-xt/rustic-black.png`);
+    expect(keys[1]).toBe(`renders/${UPLOAD_ID}/tamko-titan-xt/rustic-black-black.png`);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
   it('502s with generation-failed when Nova Canvas invocation throws', async () => {
     s3Mock.on(HeadObjectCommand).rejects(new Error('NotFound'));
     s3Mock.on(GetObjectCommand).resolves({ Body: Buffer.from('fake-source-bytes') as never });

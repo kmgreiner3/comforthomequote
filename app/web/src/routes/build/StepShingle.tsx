@@ -7,6 +7,7 @@ import { RevealGroup, RevealItem } from './motion';
 import Drawer from './Drawer';
 import Lightbox, { type LightboxImage } from '../../components/Lightbox';
 import { WARRANTY_FOOTNOTE } from '../../content/footnote';
+import { MANUFACTURER_WARRANTY_LINE } from '../../content/warranty';
 
 // Product literature shown in each shingle's "Learn more" drawer. IKO's
 // three images are pages of the same brochure (one shared caption); Titan's
@@ -28,9 +29,26 @@ const LITERATURE_CAPTIONS: Record<ShingleKey, string[]> = {
   'tamko-titan-xt': ['Titan XT colors and features', 'Hurricane Milton case study'],
 };
 
+// Verified warranty facts for the Learn More drawer (Dylan Nadeau, per the
+// plan discussion + review amendments). Conditional phrasing kept exactly --
+// "when installed according to applicable ... requirements" -- never a bare
+// claim that a given roof actually meets that standard.
+const WARRANTY_DETAILS: Record<ShingleKey, string[]> = {
+  'iko-cambridge': [
+    '10-year Iron Clad Protection period*',
+    '110 MPH standard Limited Wind Warranty, up to 130 MPH when installed according to applicable IKO high-wind requirements (six-nail application)*',
+  ],
+  'tamko-titan-xt': [
+    '10-year Full Start non-prorated warranty period*',
+    'Up to 160 MPH, 15-year Limited Wind Warranty when installed according to applicable TAMKO high-wind requirements (TAMKO starter and hip and ridge)*',
+    'UL 2218 Class 3 impact resistance',
+  ],
+};
+
 export default function StepShingle({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const sq = useBuild((s) => s.sq);
-  const underlayment = useBuild((s) => s.underlayment);
+  // round8: configuredTotal now takes solarPanels (not underlayment).
+  const solarPanels = useBuild((s) => s.solarPanels);
   const shingle = useBuild((s) => s.shingle);
   const setShingle = useBuild((s) => s.setShingle);
   const [drawerKey, setDrawerKey] = useState<ShingleKey | null>(null);
@@ -38,7 +56,7 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
 
   if (sq == null) return null; // shouldn't render: gated behind a valid home size
 
-  const betterTotal = configuredTotal(sq, 'iko-cambridge', underlayment);
+  const betterTotal = configuredTotal(sq, 'iko-cambridge', solarPanels ?? 0);
   const betterMonthly = estimatedMonthly(betterTotal);
   const delta = titanUpgrade(sq);
   const bestTotal = betterTotal + delta;
@@ -83,6 +101,10 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
                   </li>
                 ))}
               </ul>
+              <p className="mt-4 text-sm font-semibold opacity-90">
+                {SHINGLES['iko-cambridge'].workmanshipYears} year workmanship guarantee
+              </p>
+              <p className="mt-1 text-sm opacity-80">{MANUFACTURER_WARRANTY_LINE['iko-cambridge']}</p>
               <span className="mt-5 inline-block rounded-full border border-current px-4 py-1.5 text-xs font-bold uppercase tracking-wide">
                 Select
               </span>
@@ -111,6 +133,10 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
                   </li>
                 ))}
               </ul>
+              <p className="mt-4 text-sm font-semibold opacity-90">
+                {SHINGLES['tamko-titan-xt'].workmanshipYears} year workmanship guarantee
+              </p>
+              <p className="mt-1 text-sm opacity-80">{MANUFACTURER_WARRANTY_LINE['tamko-titan-xt']}</p>
               <span className="mt-5 inline-block rounded-full border border-current px-4 py-1.5 text-xs font-bold uppercase tracking-wide">
                 Upgrade
               </span>
@@ -145,6 +171,18 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
                 <li key={h} className="flex gap-2">
                   <span aria-hidden="true">&bull;</span>
                   <span>{h}</span>
+                </li>
+              ))}
+            </ul>
+
+            <p className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wide text-blue-600">
+              Warranty details
+            </p>
+            <ul className="space-y-2 text-sm text-ink/90">
+              {WARRANTY_DETAILS[drawerKey].map((d) => (
+                <li key={d} className="flex gap-2">
+                  <span aria-hidden="true">&bull;</span>
+                  <span>{d}</span>
                 </li>
               ))}
             </ul>

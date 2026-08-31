@@ -1,12 +1,12 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { ProtectionLevel, ShingleKey, Underlayment } from '@chq/pricing';
+import type { ProtectionLevel, ShingleKey } from '@chq/pricing';
 import {
   cashPrice,
   configuredTotal,
   estimatedMonthly,
   guarantee,
-  peelStickUpgrade,
+  solarCost,
   sqFromOutline,
   titanUpgrade,
 } from '@chq/pricing';
@@ -114,7 +114,12 @@ export interface BuildState {
   outlineCorners: LatLngCorner[] | null;
   shingle: ShingleKey | null;
   color: string | null;
-  underlayment: Underlayment; // default 'synthetic'
+  // Feedback round 8: peel & stick is standard on every quote now, so
+  // underlayment is no longer a store field (see the version 3 migration
+  // below). Homeowner-entered solar panel count for removal/reinstall
+  // pricing: null means the question has not been answered yet (gates
+  // Continue on the home step); 0 means answered "No solar panels".
+  solarPanels: number | null;
   dripEdge: DripEdge | null;
   accepted: boolean; // set by "I'm Ready to Move Forward"
   contact: Contact | null;
@@ -139,8 +144,8 @@ export interface BuildState {
   // DIFFERENT address clears outline/sq/outlineSource/propertyImageUrl (the prior
   // measurement no longer applies to a different property) and the
   // measurement-attempt cache, but deliberately leaves shingle/color/
-  // underlayment/dripEdge/accepted/contact/visit untouched so switching
-  // addresses mid-flow (the address chip's "Change") keeps the rest of the
+  // dripEdge/accepted/contact/visit untouched so switching addresses
+  // mid-flow (the address chip's "Change") keeps the rest of the
   // configuration intact for a fast side-by-side price check.
   setAddress(a: string, placeId?: string | null): void;
   // Adopts the geocode's canonical formatted address (which always includes
@@ -182,7 +187,9 @@ export interface BuildState {
   setPropertyImageUrl(url: string | null): void;
   setShingle(k: ShingleKey): void;
   setColor(c: string): void;
-  setUnderlayment(u: Underlayment): void;
+  // Feedback round 8, Commit 1: just the store setter here (the property
+  // question UI itself is Commit 2's job). Pass null to mark unanswered.
+  setSolarPanels(n: number | null): void;
   setDripEdge(c: DripEdge): void;
   accept(): void;
   setContact(c: Contact): void;
@@ -210,7 +217,7 @@ type PersistedFields = Pick<
   | 'outlineCorners'
   | 'shingle'
   | 'color'
-  | 'underlayment'
+  | 'solarPanels'
   | 'dripEdge'
   | 'accepted'
   | 'contact'
@@ -228,7 +235,7 @@ const initialState: PersistedFields = {
   outlineCorners: null,
   shingle: null,
   color: null,
-  underlayment: 'synthetic',
+  solarPanels: null,
   dripEdge: null,
   accepted: false,
   contact: null,
@@ -317,7 +324,7 @@ export const useBuild = create<BuildState>()(
         set({ shingle: k, color: null });
       },
       setColor: (c) => set({ color: c }),
-      setUnderlayment: (u) => set({ underlayment: u }),
+      setSolarPanels: (n) => set({ solarPanels: n }),
       setDripEdge: (c) => set({ dripEdge: c }),
       accept: () => set({ accepted: true }),
       setContact: (c) => set({ contact: c }),
@@ -337,15 +344,28 @@ export const useBuild = create<BuildState>()(
       // key in older persisted JSON -- zustand's default merge,
       // `{ ...currentState, ...persistedState }`, leaves the freshly-
       // initialized default (null) in place for those, no migration step
-      // needed. version/migrate exist only for feedback round 7's
-      // outlineCorners shape change (4 points -> 6): that one DOES need an
-      // actual transform, not just "leave the default alone", since a
-      // pre-round-7 array is present but the WRONG shape.
-      version: 1,
+      // needed. version/migrate exist for the shape changes that DO need an
+      // actual transform rather than just "leave the default alone":
+      // feedback round 7's outlineCorners shape change (4 points -> 6, a
+      // pre-round-7 array is present but the WRONG shape), and feedback
+      // round 8's underlayment removal below (a pre-round-8 blob has a
+      // field that must be dropped, not merely left alone).
+      version: 3,
       migrate: (persistedState, version) => {
         const state = persistedState as Record<string, unknown>;
         if (version < 1 && state && typeof state === 'object' && 'outlineCorners' in state) {
           state.outlineCorners = upgradeOutlineCornersTo6(state.outlineCorners);
+        }
+        // Feedback round 8: peel & stick is standard for every quote now,
+        // so underlayment is no longer a field at all (drop it whether it
+        // was 'synthetic' or 'peel-stick'); solarPanels is new and defaults
+        // to null (unanswered) whenever a persisted blob doesn't have it
+        // yet. version < 3 catches every persisted shape written before
+        // this release, including the ones that already went through the
+        // version 1 migration above.
+        if (version < 3 && state && typeof state === 'object') {
+          delete state.underlayment;
+          if (state.solarPanels == null) state.solarPanels = null;
         }
         return state;
       },
@@ -359,7 +379,7 @@ export const useBuild = create<BuildState>()(
 
 export function selectTotal(s: BuildState): number | null {
   if (s.sq == null || s.shingle == null) return null;
-  return configuredTotal(s.sq, s.shingle, s.underlayment);
+  return configuredTotal(s.sq, s.shingle, s.solarPanels ?? 0);
 }
 
 export function selectMonthly(s: BuildState): number | null {
@@ -371,13 +391,15 @@ export function selectUpgradeDelta(s: BuildState): number | null {
   return s.sq == null ? null : titanUpgrade(s.sq);
 }
 
-export function selectPeelStickDelta(s: BuildState): number | null {
-  return s.sq == null ? null : peelStickUpgrade(s.sq);
+// Feedback round 8: solarPanels null means the question is unanswered, so
+// this stays null too (distinct from 0, the answered "no panels" cost).
+export function selectSolarCost(s: BuildState): number | null {
+  return s.solarPanels == null ? null : solarCost(s.solarPanels);
 }
 
 export function selectGuarantee(s: BuildState): { level: ProtectionLevel; years: number } | null {
   if (s.shingle == null) return null;
-  return guarantee(s.shingle, s.underlayment);
+  return guarantee(s.shingle);
 }
 
 export function selectCash(s: BuildState): number | null {

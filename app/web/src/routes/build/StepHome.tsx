@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useBuild } from '../../state/build';
+import { validateFloridaAddress } from '../../lib/address';
 import {
   AccuracyNotice,
   BackChevron,
@@ -15,9 +16,14 @@ import { isLatLngCornerArray, isMapMeta, type LatLngCorner, type MapMeta } from 
 import { areaSqftFromLatLngCorners } from '../../lib/mercator';
 import RoofOutlineEditor from './RoofOutlineEditor';
 import RoofOutlineOverlay from './RoofOutlineOverlay';
+import AddressCombobox from '../../components/AddressCombobox';
+import AddressChip from './AddressChip';
+import { SOLAR_QUESTION } from '../../content/propertyQuestions';
 
 const MIN_SQFT = 500;
 const MAX_SQFT = 15000;
+const MIN_SOLAR_PANELS = 1;
+const MAX_SOLAR_PANELS = 60;
 
 // Global Constraint: 8s timeout on the measurement fetch.
 const MEASURE_TIMEOUT_MS = 8000;
@@ -147,7 +153,169 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
   return { kind: 'loading' };
 }
 
-export default function StepHome({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
+// State A (feedback round 8: Home absorbs address): exactly today's address
+// entry behavior, ported unchanged from the old StepAddress. Its own
+// component so its local input/placeId/touched state resets cleanly every
+// time it mounts (fresh entry, or a "Change" reopening it).
+function AddressEntry({
+  initialValue,
+  initialPlaceId,
+  onSubmitted,
+}: {
+  initialValue: string;
+  initialPlaceId: string | null;
+  onSubmitted: (address: string, placeId: string | null) => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const [placeId, setPlaceId] = useState<string | null>(initialValue ? initialPlaceId : null);
+  const [touched, setTouched] = useState(false);
+
+  const trimmed = value.trim();
+  const validation = validateFloridaAddress(value);
+
+  function handleValueChange(next: string) {
+    setValue(next);
+    setPlaceId(null); // any manual edit invalidates a previously picked suggestion
+  }
+
+  function handleSelectSuggestion(description: string, selectedPlaceId: string) {
+    setValue(description);
+    setPlaceId(selectedPlaceId);
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setTouched(true);
+    // A picked suggestion is Google-canonicalized -- skip the client-side
+    // format check and trust it directly.
+    if (placeId) {
+      onSubmitted(trimmed, placeId);
+      return;
+    }
+    if (!validation.ok) return;
+    onSubmitted(trimmed, null);
+  }
+
+  return (
+    <RevealGroup>
+      <RevealItem>
+        <StepHeading
+          eyebrow="Let's start with your home"
+          title="Where's the roof?"
+          subtitle="Enter the address where you're considering replacing the roof."
+        />
+      </RevealItem>
+
+      <RevealItem>
+        <form onSubmit={handleSubmit} className="max-w-xl">
+          <label htmlFor="property-address" className="sr-only">
+            Property address
+          </label>
+          <AddressCombobox
+            id="property-address"
+            value={value}
+            onValueChange={handleValueChange}
+            onSelect={handleSelectSuggestion}
+            placeholder="123 Palm Ave, Tampa, FL 33602"
+            inputClassName="min-h-[44px] w-full rounded-xl border-2 border-navy-950/15 bg-white px-5 py-4 text-lg text-ink outline-none transition-colors focus:border-blue-600"
+          />
+          {/* A picked suggestion (placeId set) must never even FLASH the
+              format-validation error, even though it still submits fine --
+              `validation` is computed unconditionally above off `value`,
+              and a Google suggestion description can fail it (missing ZIP)
+              the same way a free-typed one can (feedback round 7, Task C
+              item 1). */}
+          {touched && !placeId && !validation.ok && (
+            <p className="mt-2 text-sm text-red-600">{validation.error}</p>
+          )}
+          <p className="mt-2 text-sm text-ink/60">
+            Serving Florida homeowners. Enter your full address with ZIP code.
+          </p>
+          <PrimaryButton type="submit" className="mt-5 w-full sm:w-auto">
+            Build My Roof
+          </PrimaryButton>
+        </form>
+      </RevealItem>
+
+      <RevealItem>
+        <p className="mt-8 text-sm text-ink/60">
+          No name, phone, or email needed to see your price.
+        </p>
+      </RevealItem>
+    </RevealGroup>
+  );
+}
+
+// State C (feedback round 8): a segmented no/yes answer, plus a 1..60 count
+// stepper once "Yes" is picked. `value` is the store's solarPanels field
+// directly -- null means unanswered, 0 means answered "no panels".
+function SolarQuestion({ value, onChange }: { value: number | null; onChange: (n: number) => void }) {
+  const answeredNo = value === 0;
+  const hasPanels = value != null && value > 0;
+  const count = hasPanels ? value : MIN_SOLAR_PANELS;
+
+  function step(delta: number) {
+    const next = Math.min(MAX_SOLAR_PANELS, Math.max(MIN_SOLAR_PANELS, count + delta));
+    onChange(next);
+  }
+
+  return (
+    <div className="max-w-md rounded-2xl border-2 border-navy-950/10 bg-white p-5">
+      <p className="font-display text-lg font-semibold text-navy-950">{SOLAR_QUESTION.label}</p>
+      <p className="mt-1.5 text-sm text-ink/70">{SOLAR_QUESTION.help}</p>
+      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label={SOLAR_QUESTION.label}>
+        <button
+          type="button"
+          aria-pressed={answeredNo}
+          onClick={() => onChange(0)}
+          className={`min-h-[44px] rounded-full border-2 px-5 py-2.5 text-sm font-semibold transition-colors duration-200 ${
+            answeredNo ? 'border-blue-600 bg-blue-600 text-white' : 'border-navy-950/15 bg-white text-ink hover:border-blue-600/50'
+          }`}
+        >
+          No solar panels
+        </button>
+        <button
+          type="button"
+          aria-pressed={hasPanels}
+          onClick={() => onChange(count)}
+          className={`min-h-[44px] rounded-full border-2 px-5 py-2.5 text-sm font-semibold transition-colors duration-200 ${
+            hasPanels ? 'border-blue-600 bg-blue-600 text-white' : 'border-navy-950/15 bg-white text-ink hover:border-blue-600/50'
+          }`}
+        >
+          Yes
+        </button>
+      </div>
+
+      {hasPanels && (
+        <div className="mt-4 flex items-center gap-4" role="group" aria-label="Number of solar panels">
+          <button
+            type="button"
+            aria-label="Decrease panel count"
+            disabled={count <= MIN_SOLAR_PANELS}
+            onClick={() => step(-1)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-navy-950/15 text-lg font-semibold text-navy-950 transition-colors disabled:cursor-not-allowed disabled:opacity-30 enabled:hover:border-blue-600/50"
+          >
+            &minus;
+          </button>
+          <span className="w-10 text-center font-display text-xl font-semibold tabular-nums text-navy-950">
+            {count}
+          </span>
+          <button
+            type="button"
+            aria-label="Increase panel count"
+            disabled={count >= MAX_SOLAR_PANELS}
+            onClick={() => step(1)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-navy-950/15 text-lg font-semibold text-navy-950 transition-colors disabled:cursor-not-allowed disabled:opacity-30 enabled:hover:border-blue-600/50"
+          >
+            +
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function StepHome({ onContinue }: { onContinue: () => void }) {
   const setOutline = useBuild((s) => s.setOutline);
   const setOutlineFromSatellite = useBuild((s) => s.setOutlineFromSatellite);
   const setOutlineAdjusted = useBuild((s) => s.setOutlineAdjusted);
@@ -163,9 +331,17 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   const mapMeta = useBuild((s) => s.mapMeta);
   const outlineCorners = useBuild((s) => s.outlineCorners);
   const savedOutline = useBuild((s) => s.outlineSqft);
+  const sq = useBuild((s) => s.sq);
   const outlineSource = useBuild((s) => s.outlineSource);
   const address = useBuild((s) => s.address);
   const placeId = useBuild((s) => s.placeId);
+  const solarPanels = useBuild((s) => s.solarPanels);
+  const setSolarPanels = useBuild((s) => s.setSolarPanels);
+
+  // State A vs. B/C: no address yet always starts at entry; a "Change"
+  // click on the inline chip below reopens it later without touching the
+  // store until the entry form is actually submitted.
+  const [addressEntryOpen, setAddressEntryOpen] = useState(!address || !address.trim());
 
   // Client pricing-display rule extends here: a satellite-sourced OR
   // homeowner-adjusted outline must never leak into the DOM, including as
@@ -311,10 +487,22 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   const isValid = value.trim() !== '' && Number.isFinite(numeric) && numeric >= MIN_SQFT && numeric <= MAX_SQFT;
   const showRangeError = value.trim() !== '' && !isValid;
 
+  // Submitting the address entry form (state A): record it, then re-derive
+  // the right measuring phase the same way a fresh mount would (reusing
+  // initialPhase keeps the measurement-attempt cache honored on a re-submit
+  // of an unchanged address, rather than forcing a redundant live fetch).
+  function handleAddressSubmitted(nextAddress: string, nextPlaceId: string | null) {
+    const setAddress = useBuild.getState().setAddress;
+    if (nextPlaceId) setAddress(nextAddress, nextPlaceId);
+    else setAddress(nextAddress);
+    const state = useBuild.getState();
+    setPhase(initialPhase(state.address, state.outlineSqft));
+    setAddressEntryOpen(false);
+  }
+
   function handleContinue() {
     if (!isValid) return;
     setOutline(numeric);
-    onContinue();
   }
 
   function handleConfirmSatellite(sqft: number, adjusted: boolean) {
@@ -323,7 +511,6 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     // here via setOutlineFromSatellite would wrongly overwrite
     // outlineSource back to 'satellite'.
     if (!adjusted) setOutlineFromSatellite(sqft);
-    onContinue();
   }
 
   function handlePreferManual() {
@@ -354,58 +541,33 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
   // homeowner-drawn outline (feedback round 7, Task C item 2).
   function handleApplyTrace(sqft: number, corners: LatLngCorner[]) {
     setOutlineAdjusted(sqft, corners);
-    onContinue();
   }
 
-  if (phase.kind === 'loading') {
+  // State A: address entry, exactly today's behavior. No BackChevron here --
+  // Home is now the very first step in the flow, nothing to go back to.
+  if (addressEntryOpen) {
     return (
-      <RevealGroup>
-        <RevealItem>
-          <BackChevron onClick={onBack} />
-          <StepHeading
-            eyebrow="Your home"
-            title="Confirm your home's size"
-            subtitle="You can find your home's footprint on your county property appraiser's site."
-          />
-        </RevealItem>
-        <RevealItem>
-          <div
-            className="flex max-w-sm items-center gap-3 rounded-xl bg-white p-4"
-            role="status"
-            aria-live="polite"
-          >
-            <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-600/30 border-t-blue-600" />
-            <p className="text-base text-ink/70">Sizing your roof from satellite imagery...</p>
-          </div>
-        </RevealItem>
-      </RevealGroup>
+      <AddressEntry
+        initialValue={address ?? ''}
+        initialPlaceId={placeId}
+        onSubmitted={handleAddressSubmitted}
+      />
     );
   }
 
-  if (phase.kind === 'outside-florida') {
-    return (
-      <RevealGroup>
-        <RevealItem>
-          <BackChevron onClick={onBack} />
-        </RevealItem>
-        <RevealItem>
-          <div className="max-w-sm rounded-2xl border-2 border-red-200 bg-red-50 p-5">
-            <p className="font-display text-lg font-semibold text-navy-950">
-              That address is outside Florida.
-            </p>
-            <p className="mt-1.5 text-sm text-ink/70">
-              We currently serve Florida homes only. Check the address and try again.
-            </p>
-            <PrimaryButton className="mt-4" onClick={onBack}>
-              Fix my address
-            </PrimaryButton>
-          </div>
-        </RevealItem>
-      </RevealGroup>
-    );
+  function reopenAddressEntry() {
+    setAddressEntryOpen(true);
   }
+
+  // State B: measuring -> aerial confirm/trace/manual fallback. Every phase
+  // below commits the outline into the store as before, but none of them
+  // navigate away anymore -- state C (below) appears once `sq` is set, and
+  // ITS Continue is the only thing that actually advances to Shingle.
+  let phaseNode: ReactNode;
 
   if (phase.kind === 'editor') {
+    // Adjusting the outline takes over the whole screen; no property
+    // questions block underneath while it's open.
     return (
       <RevealGroup>
         <RevealItem>
@@ -433,11 +595,55 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
     );
   }
 
-  if (phase.kind === 'trace') {
-    return (
-      <RevealGroup>
+  if (phase.kind === 'loading') {
+    phaseNode = (
+      <>
         <RevealItem>
-          <BackChevron onClick={onBack} />
+          <BackChevron onClick={reopenAddressEntry} />
+          <StepHeading
+            eyebrow="Your home"
+            title="Confirm your home's size"
+            subtitle="You can find your home's footprint on your county property appraiser's site."
+          />
+        </RevealItem>
+        <RevealItem>
+          <div
+            className="flex max-w-sm items-center gap-3 rounded-xl bg-white p-4"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-600/30 border-t-blue-600" />
+            <p className="text-base text-ink/70">Sizing your roof from satellite imagery...</p>
+          </div>
+        </RevealItem>
+      </>
+    );
+  } else if (phase.kind === 'outside-florida') {
+    phaseNode = (
+      <>
+        <RevealItem>
+          <BackChevron onClick={reopenAddressEntry} />
+        </RevealItem>
+        <RevealItem>
+          <div className="max-w-sm rounded-2xl border-2 border-red-200 bg-red-50 p-5">
+            <p className="font-display text-lg font-semibold text-navy-950">
+              That address is outside Florida.
+            </p>
+            <p className="mt-1.5 text-sm text-ink/70">
+              We currently serve Florida homes only. Check the address and try again.
+            </p>
+            <PrimaryButton className="mt-4" onClick={reopenAddressEntry}>
+              Fix my address
+            </PrimaryButton>
+          </div>
+        </RevealItem>
+      </>
+    );
+  } else if (phase.kind === 'trace') {
+    phaseNode = (
+      <>
+        <RevealItem>
+          <BackChevron onClick={reopenAddressEntry} />
           <StepHeading
             eyebrow="Your home"
             title="Draw your roof outline"
@@ -459,16 +665,14 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
             />
           </RevealItem>
         )}
-      </RevealGroup>
+      </>
     );
-  }
-
-  if (phase.kind === 'confirm') {
+  } else if (phase.kind === 'confirm') {
     const canAdjustOutline = Boolean(mapMeta) && Boolean(outlineCorners) && Boolean(phase.imageUrl) && !imgFailed;
-    return (
-      <RevealGroup>
+    phaseNode = (
+      <>
         <RevealItem>
-          <BackChevron onClick={onBack} />
+          <BackChevron onClick={reopenAddressEntry} />
           <StepHeading
             eyebrow="Your home"
             title="Confirm your home's size"
@@ -551,60 +755,85 @@ export default function StepHome({ onContinue, onBack }: { onContinue: () => voi
             Prefer to enter your home&apos;s footprint? Enter it manually.
           </button>
         </RevealItem>
-      </RevealGroup>
+      </>
+    );
+  } else {
+    // form: manual footprint entry.
+    phaseNode = (
+      <>
+        <RevealItem>
+          <BackChevron onClick={reopenAddressEntry} />
+          <StepHeading
+            eyebrow="Your home"
+            title="Confirm your home's size"
+            subtitle="You can find your home's footprint on your county property appraiser's site."
+          />
+        </RevealItem>
+
+        <RevealItem>
+          <div className="max-w-sm">
+            <label htmlFor="footprint" className="text-sm font-medium text-ink/70">
+              Home footprint (sq ft)
+            </label>
+            <input
+              id="footprint"
+              name="footprint"
+              type="number"
+              inputMode="numeric"
+              min={MIN_SQFT}
+              max={MAX_SQFT}
+              placeholder="2,000"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="mt-2 min-h-[44px] w-full appearance-none rounded-xl border-2 border-navy-950/15 bg-white px-5 py-4 text-lg tabular-nums text-ink outline-none transition-colors [appearance:textfield] focus:border-blue-600 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            />
+            {showRangeError && (
+              <p className="mt-2 text-sm text-red-600">Enter a footprint between 500 and 15,000 sq ft.</p>
+            )}
+          </div>
+        </RevealItem>
+
+        {isValid && (
+          <RevealItem>
+            <div className="mt-6 flex max-w-sm items-center gap-3 rounded-xl bg-white p-4">
+              <CheckMark className="h-6 w-6 shrink-0 text-blue-600" />
+              <p className="font-display text-lg font-medium text-navy-950">
+                Got it. We&apos;ve sized your roof.
+              </p>
+            </div>
+          </RevealItem>
+        )}
+
+        <RevealItem>
+          <PrimaryButton className="mt-8" disabled={!isValid} onClick={handleContinue}>
+            Use this footprint
+          </PrimaryButton>
+        </RevealItem>
+      </>
     );
   }
 
   return (
     <RevealGroup>
-      <RevealItem>
-        <BackChevron onClick={onBack} />
-        <StepHeading
-          eyebrow="Your home"
-          title="Confirm your home's size"
-          subtitle="You can find your home's footprint on your county property appraiser's site."
-        />
-      </RevealItem>
-
-      <RevealItem>
-        <div className="max-w-sm">
-          <label htmlFor="footprint" className="text-sm font-medium text-ink/70">
-            Home footprint (sq ft)
-          </label>
-          <input
-            id="footprint"
-            name="footprint"
-            type="number"
-            inputMode="numeric"
-            min={MIN_SQFT}
-            max={MAX_SQFT}
-            placeholder="2,000"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            className="mt-2 min-h-[44px] w-full appearance-none rounded-xl border-2 border-navy-950/15 bg-white px-5 py-4 text-lg tabular-nums text-ink outline-none transition-colors [appearance:textfield] focus:border-blue-600 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-          />
-          {showRangeError && (
-            <p className="mt-2 text-sm text-red-600">Enter a footprint between 500 and 15,000 sq ft.</p>
-          )}
-        </div>
-      </RevealItem>
-
-      {isValid && (
+      {address && (
         <RevealItem>
-          <div className="mt-6 flex max-w-sm items-center gap-3 rounded-xl bg-white p-4">
-            <CheckMark className="h-6 w-6 shrink-0 text-blue-600" />
-            <p className="font-display text-lg font-medium text-navy-950">
-              Got it. We&apos;ve sized your roof.
-            </p>
+          <AddressChip address={address} onChange={reopenAddressEntry} />
+        </RevealItem>
+      )}
+      {phaseNode}
+      {/* State C (feedback round 8): appears below confirm once an outline
+          exists. This is the only Continue that advances past Home. */}
+      {sq != null && (
+        <RevealItem>
+          <div className="mt-10 max-w-md border-t border-navy-950/10 pt-8">
+            <StepHeading eyebrow="A couple quick questions" title="Tell us about your property" />
+            <SolarQuestion value={solarPanels} onChange={setSolarPanels} />
+            <PrimaryButton className="mt-6" disabled={sq == null || solarPanels == null} onClick={onContinue}>
+              Continue
+            </PrimaryButton>
           </div>
         </RevealItem>
       )}
-
-      <RevealItem>
-        <PrimaryButton className="mt-8" disabled={!isValid} onClick={handleContinue}>
-          Continue
-        </PrimaryButton>
-      </RevealItem>
     </RevealGroup>
   );
 }

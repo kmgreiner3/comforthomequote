@@ -5,11 +5,6 @@ import { perMonth, usd } from '../../lib/format';
 import { SecondaryLinkButton, StepHeading } from '../build/ui';
 import { RevealGroup, RevealItem } from '../build/motion';
 
-const UNDERLAYMENT_SUMMARY: Record<'synthetic' | 'peel-stick', string> = {
-  synthetic: 'Standard Synthetic',
-  'peel-stick': 'Premium Peel & Stick',
-};
-
 const NEXT_STEPS = [
   'Your project information is reviewed.',
   'Your project manager completes the pre-installation visit.',
@@ -44,7 +39,7 @@ export default function StepConfirm() {
   const state = useBuild();
   const resetQuote = useBuild((s) => s.resetQuote);
   const navigate = useNavigate();
-  const { shingle, color, underlayment, address, visit } = state;
+  const { shingle, color, address, visit } = state;
   if (shingle == null || color == null || visit == null) return null; // shouldn't render: gated behind the full flow
 
   const total = selectTotal(state);
@@ -74,7 +69,7 @@ export default function StepConfirm() {
             </p>
             <SummaryRow label="System" value={SHINGLES[shingle].name} />
             <SummaryRow label="Color" value={color} />
-            <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY[underlayment]} />
+            <SummaryRow label="Underlayment" value="Premium Peel & Stick" />
             <SummaryRow label="Protection level" value={guaranteeInfo.level} />
             <SummaryRow label="Workmanship guarantee" value={`${guaranteeInfo.years} years`} />
             <SummaryRow label="Property" value={address ?? 'Not provided'} />
