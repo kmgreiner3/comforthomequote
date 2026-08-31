@@ -1,6 +1,10 @@
 resource "aws_apigatewayv2_api" "chq_api" {
   name          = "chq-api"
   protocol_type = "HTTP"
+
+  # All traffic comes through CloudFront (/api/* behavior). The direct
+  # execute-api URL would bypass the CloudFront hop clientIp trusts.
+  disable_execute_api_endpoint = true
 }
 
 resource "aws_apigatewayv2_stage" "default" {

@@ -102,3 +102,18 @@ resource "aws_ssm_parameter" "google_api_key" {
     ignore_changes = [value]
   }
 }
+
+# TEMPORARY test credential: a GCP service-account key for the Vertex
+# visualizer backend, set out-of-band exactly like the Google API key.
+# Migrate to a personal-project credential (ideally keyless WIF), then
+# delete this parameter and rotate the key.
+resource "aws_ssm_parameter" "vertex_sa_key" {
+  name        = "/chq/vertex-sa-key"
+  description = "TEMPORARY test credential for the Vertex visualizer backend; migrate and rotate"
+  type        = "SecureString"
+  value       = "unset"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
