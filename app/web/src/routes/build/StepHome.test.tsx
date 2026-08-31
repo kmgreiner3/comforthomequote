@@ -95,7 +95,7 @@ describe('StepHome: address entry (state A, feedback round 8 -- Home absorbs Add
 });
 
 describe('StepHome: satellite measurement -> confirm no longer navigates (feedback round 8)', () => {
-  it('shows the confirmation card with the rounded footprint, and "Looks right, continue" commits the outline WITHOUT calling onContinue', async () => {
+  it('shows the confirmation card with the rounded footprint, and "Use this outline" commits the outline WITHOUT calling onContinue', async () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 2308.32 }) })
     );
@@ -110,7 +110,7 @@ describe('StepHome: satellite measurement -> confirm no longer navigates (feedba
     expect(document.body.textContent).not.toMatch(/2308/);
     expect(document.body.textContent).not.toMatch(/squares?\b/i);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Looks right, continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
 
     expect(onContinue).not.toHaveBeenCalled();
     const s = useBuild.getState();
@@ -129,9 +129,84 @@ describe('StepHome: satellite measurement -> confirm no longer navigates (feedba
 
     expect(screen.queryByText('Do you have solar panels on your roof?')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Looks right, continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
 
     expect(screen.getByText('Do you have solar panels on your roof?')).toBeTruthy();
+  });
+});
+
+describe('StepHome: confirming collapses to the confirmed row (client feedback 2026-08-31)', () => {
+  const MAP_META = {
+    centerLat: 27.336230049999998,
+    centerLng: -82.539976,
+    zoom: 20,
+    sw: { lat: 27.3360897, lng: -82.5400199 },
+    ne: { lat: 27.3363704, lng: -82.5399321 },
+    imgW: 1280,
+    imgH: 800,
+  };
+
+  it('after "Use this outline" the confirm card is gone, the confirmed row shows, and focus lands on the questions block', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({ found: true, outlineSqft: 2308.32 }) }))
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+
+    expect(screen.queryByText('We found your roof.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Use this outline' })).toBeNull();
+    expect(screen.getByText('Roof size confirmed.')).toBeTruthy();
+    expect(screen.getByText(/About 2,300 sq ft footprint/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/2308/);
+    // The questions block itself holds focus so the next action is obvious.
+    const questions = screen.getByText('Tell us about your property').closest('div[tabindex="-1"]');
+    expect(questions).toBeTruthy();
+    expect(document.activeElement).toBe(questions);
+  });
+
+  it('"Change" on a satellite outline reopens the confirm card, and re-confirming an adjusted one keeps outlineSource adjusted', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ found: true, outlineSqft: 2000, imageUrl: 'https://x/a.png', mapMeta: MAP_META }),
+        })
+      )
+    );
+    setup();
+    await screen.findByText('We found your roof.');
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+    expect(useBuild.getState().outlineSource).toBe('satellite');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change roof size' }));
+    expect(await screen.findByText('We found your roof.')).toBeTruthy();
+
+    // Adjust, apply, land back on confirm, confirm again: source stays adjusted.
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust outline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+    await screen.findByText('We found your roof.');
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
+    expect(screen.getByText('Roof size confirmed.')).toBeTruthy();
+    expect(useBuild.getState().outlineSource).toBe('adjusted');
+  });
+
+  it('manual commit collapses the form to the confirmed row too', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({ found: false, reason: 'not-found' }) }))
+    );
+    setup();
+    const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '2000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use this footprint' }));
+
+    expect(screen.queryByLabelText('Home footprint (sq ft)')).toBeNull();
+    expect(screen.getByText('Roof size confirmed.')).toBeTruthy();
+    expect(screen.getByText('2,000 sq ft footprint.')).toBeTruthy();
   });
 });
 
@@ -143,7 +218,7 @@ describe('StepHome: solar question gates the real Continue (feedback round 8, it
     );
     const result = setup();
     await screen.findByText('We found your roof.');
-    fireEvent.click(screen.getByRole('button', { name: 'Looks right, continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use this outline' }));
     return result;
   }
 
@@ -228,14 +303,30 @@ describe('StepHome: manual entry commits without navigating either', () => {
     expect(screen.getByText('Do you have solar panels on your roof?')).toBeTruthy();
   });
 
-  it('does not prefill the manual form with a satellite-sourced saved outline, and never renders its digits', async () => {
-    useBuild.setState({ outlineSource: 'satellite', outlineSqft: 6028.758585289504 });
+  it('a satellite-sourced committed outline remounts into the confirmed row: rounded display only, exact digits never render, no manual input', async () => {
+    useBuild.getState().setAddress(ADDRESS);
+    useBuild.setState({ outlineSource: 'satellite', outlineSqft: 6028.758585289504, sq: 73 });
 
     setup();
 
-    const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
-    expect(input.value).toBe('');
+    expect(await screen.findByText('Roof size confirmed.')).toBeTruthy();
+    expect(screen.getByText(/About 6,050 sq ft footprint/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/6028/);
+    expect(screen.queryByLabelText('Home footprint (sq ft)')).toBeNull();
+  });
+
+  it('a manual committed outline remounts into the confirmed row with the exact value, and "Change" reopens the prefilled form', async () => {
+    useBuild.getState().setAddress(ADDRESS);
+    useBuild.setState({ outlineSource: 'manual', outlineSqft: 2000, sq: 24 });
+
+    setup();
+
+    expect(await screen.findByText('Roof size confirmed.')).toBeTruthy();
+    expect(screen.getByText('2,000 sq ft footprint.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change roof size' }));
+    const input = (await screen.findByLabelText('Home footprint (sq ft)')) as HTMLInputElement;
+    expect(input.value).toBe('2000');
   });
 });
 
