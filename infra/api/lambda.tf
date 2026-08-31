@@ -136,6 +136,11 @@ data "aws_iam_policy_document" "viz_generate" {
     resources = [local.nova_canvas_model_arn]
   }
   statement {
+    sid       = "ReadVertexKey"
+    actions   = ["ssm:GetParameter"]
+    resources = [aws_ssm_parameter.vertex_sa_key.arn]
+  }
+  statement {
     sid       = "UploadMetadataAndCaps"
     actions   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
     resources = [aws_dynamodb_table.api.arn]
@@ -230,15 +235,13 @@ resource "aws_lambda_function" "viz_generate" {
   filename         = data.archive_file.viz_generate.output_path
   source_code_hash = data.archive_file.viz_generate.output_base64sha256
 
-  # Task 4 gate: visualizer ships dark. Remove with the visualizer UI task,
-  # together with the global daily generate cap and the XFF clientIp fix.
-  reserved_concurrent_executions = 0
-
   environment {
     variables = {
-      BUCKET   = aws_s3_bucket.visualizer.bucket
-      TABLE    = aws_dynamodb_table.api.name
-      MODEL_ID = "amazon.nova-canvas-v1:0"
+      BUCKET           = aws_s3_bucket.visualizer.bucket
+      TABLE            = aws_dynamodb_table.api.name
+      MODEL_ID         = "amazon.nova-canvas-v1:0"
+      GEN_BACKEND      = "vertex"
+      VERTEX_KEY_PARAM = aws_ssm_parameter.vertex_sa_key.name
     }
   }
 }

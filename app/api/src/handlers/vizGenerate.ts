@@ -7,6 +7,7 @@ import { SHINGLES } from '@chq/pricing';
 import { clientIp, json, parseBody } from '../lib/http';
 import { checkAndIncrement, todayStamp } from '../lib/ratelimit';
 import { generateRoofImage, type DripEdgeColor } from '../lib/bedrock';
+import { generateRoofImageVertex } from '../lib/vertex';
 import { COLOR_DESCRIPTIONS } from '../lib/colorDescriptions';
 import { slugify } from '../lib/slug';
 
@@ -24,9 +25,12 @@ const BUCKET = process.env.BUCKET ?? '';
 const TABLE = process.env.TABLE ?? '';
 const MODEL_ID = process.env.MODEL_ID ?? '';
 
-// Global Constraints: generate capped at 60/IP/day and 40/uploadId total.
+// Global Constraints: generate capped at 60/IP/day and 40/uploadId total,
+// plus a global daily ceiling that bounds worst-case spend no matter how
+// many IPs an abuser rotates through (the API carries no preview gate).
 const GENERATE_CAP_PER_IP_PER_DAY = 60;
 const GENERATE_CAP_PER_UPLOAD = 40;
+const GENERATE_CAP_GLOBAL_PER_DAY = 100;
 
 const GET_URL_EXPIRY_SECONDS = 15 * 60;
 
@@ -93,7 +97,10 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   // drip edge mention would wrongly satisfy a later request that asked
   // for one (or vice versa).
   const dripEdgeSuffix = dripEdge ? `-${slugify(dripEdge)}` : '';
-  const renderKey = `renders/${uploadId}/${product}/${slug}${dripEdgeSuffix}.png`;
+  // v2: renders switched from the Bedrock backend to Vertex; cached Bedrock
+  // era outputs (there are none in practice, the lambda was dark) must not
+  // satisfy Vertex-era requests.
+  const renderKey = `renders/v2/${uploadId}/${product}/${slug}${dripEdgeSuffix}.png`;
 
   // Cache check happens before any rate-limit counters are touched: a
   // cache hit is free (no Bedrock call), so it must not consume either cap.
@@ -103,6 +110,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     .catch(() => false);
 
   if (!cacheHit) {
+    // Global ceiling first: it is the backstop that holds even when
+    // per-IP keys are diluted by IP rotation. Cache hits never get here.
+    const withinGlobalCap = await checkAndIncrement(
+      TABLE,
+      `generate#global#${todayStamp()}`,
+      GENERATE_CAP_GLOBAL_PER_DAY,
+    );
+    if (!withinGlobalCap) {
+      return json(429, { error: 'daily-limit' });
+    }
     const ip = clientIp(event);
     const withinIpCap = await checkAndIncrement(
       TABLE,
@@ -122,13 +139,24 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       const uploadObject = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: uploadKey }));
       const imageBase64 = await bodyToBase64(uploadObject.Body);
       const description = COLOR_DESCRIPTIONS[color] ?? '';
-      const renderBase64 = await generateRoofImage(
-        MODEL_ID,
-        imageBase64,
-        color,
-        description,
-        dripEdge as DripEdgeColor | undefined,
-      );
+      const backend = process.env.GEN_BACKEND ?? 'bedrock';
+      const uploadMime = uploadKey.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      const renderBase64 =
+        backend === 'vertex'
+          ? await generateRoofImageVertex(
+              imageBase64,
+              uploadMime,
+              color,
+              description,
+              dripEdge as DripEdgeColor | undefined,
+            )
+          : await generateRoofImage(
+              MODEL_ID,
+              imageBase64,
+              color,
+              description,
+              dripEdge as DripEdgeColor | undefined,
+            );
       await s3.send(
         new PutObjectCommand({
           Bucket: BUCKET,

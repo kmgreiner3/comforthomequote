@@ -4,6 +4,7 @@ import { useBuild, type DripEdge } from '../../state/build';
 import { colorInfo, SWATCH_NOTE } from '../../content/colorInfo';
 import { BackChevron, CheckMark, PrimaryButton, SelectionCard, StepHeading } from './ui';
 import { RevealGroup, RevealItem, useIsDesktop } from './motion';
+import VisualizerPanel from './VisualizerPanel';
 
 const DRIP_EDGE_OPTIONS: { value: DripEdge; hex: string }[] = [
   { value: 'White', hex: '#f4f4f2' },
@@ -103,9 +104,11 @@ export default function StepAppearance({ onContinue, onBack }: { onContinue: () 
         />
       </RevealItem>
 
-      {/* round8 seam: a future shingle-on-house visualizer panel slots in
-          alongside the color grid here -- no placeholder yet, just marking
-          where that component will attach. */}
+      <RevealItem>
+        <div className="mb-8">
+          <VisualizerPanel product={shingle} />
+        </div>
+      </RevealItem>
 
       <RevealItem>
         {isDesktop ? (

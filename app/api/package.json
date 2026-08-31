@@ -14,7 +14,8 @@
     "@aws-sdk/client-s3": "^3.1117.0",
     "@aws-sdk/client-ssm": "^3.1117.0",
     "@aws-sdk/s3-request-presigner": "^3.1117.0",
-    "@chq/pricing": "*"
+    "@chq/pricing": "*",
+    "google-auth-library": "^11.0.2"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.162",
