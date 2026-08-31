@@ -33,6 +33,7 @@ describe('vertex backend', () => {
     __setTokenProviderForTests(null);
     vi.unstubAllGlobals();
     delete process.env.VERTEX_MODEL;
+    delete process.env.VERTEX_PROJECT;
   });
 
   it('posts the spike-proven request shape to the global endpoint', async () => {
@@ -60,6 +61,19 @@ describe('vertex backend', () => {
     expect(parts[1].text).toContain('a bold, dimensional blend of deep black');
     expect(parts[1].text).toContain('drip edge trim along the roof edges to black');
     expect((init as RequestInit).headers).toMatchObject({ authorization: `Bearer ${FAKE_TOKEN}` });
+  });
+
+  it('VERTEX_PROJECT overrides the project in the endpoint URL (test SA lives in a different project than Vertex)', async () => {
+    process.env.VERTEX_PROJECT = 'vertex-enabled-project';
+    // The default provider applies the override; the test seam must mirror it.
+    __setTokenProviderForTests(async () => ({
+      token: FAKE_TOKEN,
+      projectId: process.env.VERTEX_PROJECT || FAKE_PROJECT,
+    }));
+    const fetchMock = vi.fn().mockResolvedValue(okResponse('eA=='));
+    vi.stubGlobal('fetch', fetchMock);
+    await generateRoofImageVertex('aW1n', 'image/png', 'Dual Black', 'A rich, classic black.');
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('/projects/vertex-enabled-project/locations/global/');
   });
 
   it('honors VERTEX_MODEL override', async () => {

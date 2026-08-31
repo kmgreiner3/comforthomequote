@@ -4,9 +4,11 @@ import type { DripEdgeColor } from './bedrock';
 
 // Vertex AI image-editing backend (gemini-2.5-flash-image), spike-proven
 // 2026-08-31. The service account key lives ONLY in the SSM parameter named
-// by VERTEX_KEY_PARAM; the GCP project id comes from the key itself so a
-// credential migration is a parameter swap, never a code change. No field
-// of the key or any access token may ever appear in logs or errors.
+// by VERTEX_KEY_PARAM. The GCP project defaults to the key's own project_id
+// so a credential migration is a parameter swap; VERTEX_PROJECT overrides it
+// when the SA's home project is not the one with Vertex enabled (the test
+// SA lives in one project but calls Vertex on another). No field of the key
+// or any access token may ever appear in logs or errors.
 
 const ssm = new SSMClient({});
 
@@ -58,7 +60,7 @@ const defaultTokenProvider: TokenProvider = async () => {
   }
   const { token } = await jwtClient.getAccessToken();
   if (!token) throw new Error('vertex-auth-failed');
-  return { token, projectId: key.project_id };
+  return { token, projectId: process.env.VERTEX_PROJECT || key.project_id };
 };
 
 let tokenProvider: TokenProvider = defaultTokenProvider;

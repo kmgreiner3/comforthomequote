@@ -165,7 +165,11 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
           ContentType: 'image/png',
         }),
       );
-    } catch {
+    } catch (err) {
+      // Operability: the thrown messages are status-only strings by
+      // construction (see vertex.ts / bedrock.ts) -- safe to log, and
+      // without this a failing backend is invisible in CloudWatch.
+      console.error('generation-failed:', err instanceof Error ? err.message : 'unknown');
       return json(502, { error: 'generation-failed' });
     }
   }
