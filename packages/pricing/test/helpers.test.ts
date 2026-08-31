@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  roundUpDollars, peelStickUpgrade, guarantee, estimatedMonthly,
+  roundUpDollars, guarantee, solarCost, estimatedMonthly,
   cashPrice, sqFromOutline, deckingAdjustment,
 } from '../src/price';
 import { SHINGLES } from '../src/products';
@@ -11,21 +11,23 @@ describe('roundUpDollars (client rule 7)', () => {
   ])('%f → %d', (x, expected) => expect(roundUpDollars(x)).toBe(expected));
 });
 
-describe('peel & stick upgrade', () => {
-  it('matches the client worked example: 27.43 SQ → $1,372', () => {
-    expect(peelStickUpgrade(27.43)).toBe(1372);
+describe('solar add on (feedback round 8, $200 per panel)', () => {
+  it('client example: 12 panels is $2,400', () => expect(solarCost(12)).toBe(2400));
+  it('accepts the boundary values 0 and 60 panels', () => {
+    expect(solarCost(0)).toBe(0);
+    expect(solarCost(60)).toBe(12000); // 60 x 200
   });
-  it('24 SQ → $1,200', () => expect(peelStickUpgrade(24)).toBe(1200));
+  it.each([-1, 61, 2.5])('rejects a panel count outside the valid integer range: %s', (bad) => {
+    expect(() => solarCost(bad)).toThrow(RangeError);
+  });
 });
 
-describe('guarantee matrix (client rule 10)', () => {
+describe('guarantee matrix (feedback round 8: keyed on shingle only)', () => {
   it.each([
-    ['iko-cambridge', 'synthetic', 'BETTER', 5],
-    ['iko-cambridge', 'peel-stick', 'BETTER+', 10],
-    ['tamko-titan-xt', 'synthetic', 'BEST', 10],
-    ['tamko-titan-xt', 'peel-stick', 'BEST+', 15],
-  ] as const)('%s + %s = %s / %d years', (s, u, level, years) => {
-    expect(guarantee(s, u)).toEqual({ level, years });
+    ['iko-cambridge', 'BETTER', 5],
+    ['tamko-titan-xt', 'BEST', 10],
+  ] as const)('%s = %s / %d years', (key, level, years) => {
+    expect(guarantee(key)).toEqual({ level, years });
   });
 });
 

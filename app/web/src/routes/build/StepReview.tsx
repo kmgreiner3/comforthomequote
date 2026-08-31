@@ -36,7 +36,7 @@ export default function StepReview({
   const state = useBuild();
   const navigate = useNavigate();
 
-  const { address, shingle, color, underlayment, dripEdge } = state;
+  const { address, shingle, color, dripEdge } = state;
   if (shingle == null || color == null || dripEdge == null) return null; // shouldn't render: gated behind full config
 
   const total = selectTotal(state);
@@ -62,7 +62,8 @@ export default function StepReview({
             {address && <SummaryRow label="Property" value={address} />}
             <SummaryRow label="System" value={SHINGLES[shingle].name} />
             <SummaryRow label="Color" value={color} />
-            <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY[underlayment]} />
+            {/* round8: removed in commit 2. Underlayment is no longer a store field; peel & stick is standard for every quote now. */}
+            <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY['peel-stick']} />
             <SummaryRow label="Drip edge" value={dripEdge} />
             <SummaryRow label="Protection level" value={guaranteeInfo.level} />
             <SummaryRow label="Workmanship guarantee" value={`${guaranteeInfo.years} years`} />

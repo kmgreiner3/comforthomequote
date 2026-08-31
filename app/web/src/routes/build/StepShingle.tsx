@@ -30,7 +30,8 @@ const LITERATURE_CAPTIONS: Record<ShingleKey, string[]> = {
 
 export default function StepShingle({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const sq = useBuild((s) => s.sq);
-  const underlayment = useBuild((s) => s.underlayment);
+  // round8: configuredTotal now takes solarPanels (not underlayment).
+  const solarPanels = useBuild((s) => s.solarPanels);
   const shingle = useBuild((s) => s.shingle);
   const setShingle = useBuild((s) => s.setShingle);
   const [drawerKey, setDrawerKey] = useState<ShingleKey | null>(null);
@@ -38,7 +39,7 @@ export default function StepShingle({ onContinue, onBack }: { onContinue: () => 
 
   if (sq == null) return null; // shouldn't render: gated behind a valid home size
 
-  const betterTotal = configuredTotal(sq, 'iko-cambridge', underlayment);
+  const betterTotal = configuredTotal(sq, 'iko-cambridge', solarPanels ?? 0);
   const betterMonthly = estimatedMonthly(betterTotal);
   const delta = titanUpgrade(sq);
   const bestTotal = betterTotal + delta;

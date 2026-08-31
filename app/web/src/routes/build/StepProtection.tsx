@@ -40,7 +40,8 @@ export default function StepProtection({ onContinue, onBack }: { onContinue: () 
       <RevealItem className="grid grid-cols-2 items-center gap-3 sm:grid-cols-5 sm:gap-4">
         <Term>{SHINGLES[shingle].name}</Term>
         <Op>+</Op>
-        <Term>{UNDERLAYMENT_LABEL[state.underlayment]}</Term>
+        {/* round8: removed in commit 2. Underlayment is no longer a store field; peel & stick is standard for every quote now. */}
+        <Term>{UNDERLAYMENT_LABEL['peel-stick']}</Term>
         <Op>=</Op>
         <div className="col-span-2 sm:col-span-1">
           <div className="rounded-2xl bg-amber-400 px-5 py-4 text-center font-display text-lg font-bold text-navy-950">

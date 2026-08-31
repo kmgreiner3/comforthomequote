@@ -1,9 +1,15 @@
-import { peelStickUpgrade } from '@chq/pricing';
+import { useState } from 'react';
 import { useBuild } from '../../state/build';
 import { usd } from '../../lib/format';
 import { BackChevron, IncludedBadge, PrimaryButton, SelectionCard, StepHeading } from './ui';
 import { RevealGroup, RevealItem } from './motion';
-import type { Underlayment } from '@chq/pricing';
+
+// round8: removed in commit 2. This whole step is dead once peel & stick
+// is standard for everyone (StepUnderlayment is deleted in Commit 2). The
+// store no longer has an underlayment field or the Underlayment type, so
+// this local type/stand-in state keeps the component compiling without a
+// redesign in the meantime.
+type Underlayment = 'synthetic' | 'peel-stick';
 
 const STANDARD_BENEFITS = [
   'Approved synthetic underlayment',
@@ -19,12 +25,14 @@ const PREMIUM_BENEFITS = [
 
 export default function StepUnderlayment({ onContinue, onBack }: { onContinue: () => void; onBack: () => void }) {
   const sq = useBuild((s) => s.sq);
-  const underlayment = useBuild((s) => s.underlayment);
-  const setUnderlayment = useBuild((s) => s.setUnderlayment);
+  // round8: removed in commit 2. Local stand-in, no longer a store field.
+  const [underlayment, setUnderlayment] = useState<Underlayment>('peel-stick');
 
   if (sq == null) return null; // shouldn't render: gated behind a valid home size
 
-  const delta = peelStickUpgrade(sq);
+  // round8: removed in commit 2. Peel & stick is baked into every total
+  // now, so there is no separate upgrade price to show here.
+  const delta = 0;
 
   // Selecting only selects (underlayment always has a valid default, so
   // Continue is never blocked here); advancing is the explicit tap below.

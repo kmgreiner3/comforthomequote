@@ -29,7 +29,7 @@ export const SHINGLES: Record<ShingleKey, ShingleProduct> = {
       'Dual Black', 'Dual Grey', 'Dual Brown', 'Weatherwood', 'Charcoal Grey',
       'Beachwood', 'Harvard Slate', 'Earthtone Cedar', 'Driftwood', 'Dove White',
     ],
-    workmanshipYears: { synthetic: 5, 'peel-stick': 10 },
+    workmanshipYears: 5,
   },
   'tamko-titan-xt': {
     key: 'tamko-titan-xt',
@@ -60,7 +60,7 @@ export const SHINGLES: Record<ShingleKey, ShingleProduct> = {
       'Rustic Cedar', 'Rustic Hickory', 'Rustic Slate', 'Shadow Grey',
       'Virginia Slate', 'Weathered Wood',
     ],
-    workmanshipYears: { synthetic: 10, 'peel-stick': 15 },
+    workmanshipYears: 10,
   },
 };
 

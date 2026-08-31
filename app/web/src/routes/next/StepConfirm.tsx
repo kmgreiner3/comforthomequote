@@ -44,7 +44,7 @@ export default function StepConfirm() {
   const state = useBuild();
   const resetQuote = useBuild((s) => s.resetQuote);
   const navigate = useNavigate();
-  const { shingle, color, underlayment, address, visit } = state;
+  const { shingle, color, address, visit } = state;
   if (shingle == null || color == null || visit == null) return null; // shouldn't render: gated behind the full flow
 
   const total = selectTotal(state);
@@ -74,7 +74,8 @@ export default function StepConfirm() {
             </p>
             <SummaryRow label="System" value={SHINGLES[shingle].name} />
             <SummaryRow label="Color" value={color} />
-            <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY[underlayment]} />
+            {/* round8: removed in commit 2. Underlayment is no longer a store field; peel & stick is standard for every quote now. */}
+            <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY['peel-stick']} />
             <SummaryRow label="Protection level" value={guaranteeInfo.level} />
             <SummaryRow label="Workmanship guarantee" value={`${guaranteeInfo.years} years`} />
             <SummaryRow label="Property" value={address ?? 'Not provided'} />
