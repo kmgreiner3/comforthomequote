@@ -97,10 +97,10 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   // drip edge mention would wrongly satisfy a later request that asked
   // for one (or vice versa).
   const dripEdgeSuffix = dripEdge ? `-${slugify(dripEdge)}` : '';
-  // v2: renders switched from the Bedrock backend to Vertex; cached Bedrock
-  // era outputs (there are none in practice, the lambda was dark) must not
-  // satisfy Vertex-era requests.
-  const renderKey = `renders/v2/${uploadId}/${product}/${slug}${dripEdgeSuffix}.png`;
+  // Version bumps whenever the prompt changes so stale-prompt renders are
+  // never served: v2 = Bedrock -> Vertex switch, v3 = shingle-texture
+  // sentence added to the prompt (flat-roof fix, 2026-08-31).
+  const renderKey = `renders/v3/${uploadId}/${product}/${slug}${dripEdgeSuffix}.png`;
 
   // Cache check happens before any rate-limit counters are touched: a
   // cache hit is free (no Bedrock call), so it must not consume either cap.
