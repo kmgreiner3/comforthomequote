@@ -242,6 +242,9 @@ resource "aws_lambda_function" "viz_generate" {
       MODEL_ID         = "amazon.nova-canvas-v1:0"
       GEN_BACKEND      = "vertex"
       VERTEX_KEY_PARAM = aws_ssm_parameter.vertex_sa_key.name
+      # The test SA's home project is not the Vertex-enabled one; this
+      # override goes away with the migration to a personal-project key.
+      VERTEX_PROJECT = "fubo-vertexai"
     }
   }
 }
