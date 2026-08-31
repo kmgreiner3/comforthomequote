@@ -9,15 +9,24 @@ export function json(statusCode: number, data: unknown): APIGatewayProxyStructur
   };
 }
 
-// First hop of x-forwarded-for is the original client (CloudFront/API GW
-// append hops as the request travels, they do not rewrite earlier ones).
-// Falls back to the source IP API GW records directly.
+// Hardened (visualizer-live): the FIRST x-forwarded-for hop is client
+// supplied and trivially spoofable, so rate-limit keys must never trust it.
+// With the execute-api endpoint disabled, every request rides
+// client -> CloudFront -> API Gateway, and the only hop we can trust is the
+// one CloudFront itself appended: the SECOND-FROM-LAST entry (the last one
+// is CloudFront's own address, appended by API Gateway). A single-entry
+// header (no CloudFront in front, e.g. tests) falls back to that entry,
+// then to the source IP API Gateway records directly.
 export function clientIp(event: APIGatewayProxyEventV2): string {
   const headers = event.headers ?? {};
   const forwarded = headers['x-forwarded-for'] ?? headers['X-Forwarded-For'];
   if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
+    const hops = forwarded
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+    if (hops.length >= 2) return hops[hops.length - 2] as string;
+    if (hops.length === 1) return hops[0] as string;
   }
   return event.requestContext?.http?.sourceIp ?? 'unknown';
 }
