@@ -2,9 +2,11 @@ resource "aws_apigatewayv2_api" "chq_api" {
   name          = "chq-api"
   protocol_type = "HTTP"
 
-  # All traffic comes through CloudFront (/api/* behavior). The direct
-  # execute-api URL would bypass the CloudFront hop clientIp trusts.
-  disable_execute_api_endpoint = true
+  # NOTE: disable_execute_api_endpoint is deliberately NOT set. CloudFront's
+  # /api/* origin is this API's execute-api domain, so disabling it cuts off
+  # CloudFront too (verified live 2026-08-31: every route 404'd until this
+  # was reverted). Locking the API to CloudFront needs a shared-secret origin
+  # header check or a custom domain first.
 }
 
 resource "aws_apigatewayv2_stage" "default" {
