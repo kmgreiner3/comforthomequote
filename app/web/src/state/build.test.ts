@@ -188,8 +188,7 @@ describe('useBuild store actions', () => {
 
   it('resetQuote() also wipes the step-flags localStorage and the measurement-attempt sessionStorage', () => {
     // Populate the two sibling storages the same way the real flow would.
-    setStepFlagDone('underlayment');
-    setStepFlagDone('protection');
+    setStepFlagDone('included');
     setMeasurementAttempt({ address: '1 Main St', outcome: 'found', sqft: 1850.5 });
 
     expect(localStorage.getItem(STEP_FLAGS_KEY)).not.toBeNull();
@@ -199,7 +198,7 @@ describe('useBuild store actions', () => {
 
     expect(localStorage.getItem(STEP_FLAGS_KEY)).toBeNull();
     expect(sessionStorage.getItem(MEASUREMENT_ATTEMPT_KEY)).toBeNull();
-    expect(getStepFlags()).toEqual({ underlayment: false, protection: false, included: false });
+    expect(getStepFlags()).toEqual({ included: false });
     expect(getMeasurementAttempt()).toBeNull();
   });
 
@@ -231,12 +230,12 @@ describe('useBuild store actions', () => {
     s0.setOutline(2000);
     s0.setShingle('tamko-titan-xt');
     s0.setColor('Rustic Black');
-    setStepFlagDone('underlayment');
+    setStepFlagDone('included');
 
     useBuild.getState().resetQuote();
 
     expect(localStorage.getItem(STORAGE_KEY)).toContain('"address":null');
-    expect(getStepFlags().underlayment).toBe(false);
+    expect(getStepFlags().included).toBe(false);
   });
 });
 

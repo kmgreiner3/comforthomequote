@@ -5,11 +5,6 @@ import { perMonth, usd } from '../../lib/format';
 import { SecondaryLinkButton, StepHeading } from '../build/ui';
 import { RevealGroup, RevealItem } from '../build/motion';
 
-const UNDERLAYMENT_SUMMARY: Record<'synthetic' | 'peel-stick', string> = {
-  synthetic: 'Standard Synthetic',
-  'peel-stick': 'Premium Peel & Stick',
-};
-
 const NEXT_STEPS = [
   'Your project information is reviewed.',
   'Your project manager completes the pre-installation visit.',
@@ -74,8 +69,7 @@ export default function StepConfirm() {
             </p>
             <SummaryRow label="System" value={SHINGLES[shingle].name} />
             <SummaryRow label="Color" value={color} />
-            {/* round8: removed in commit 2. Underlayment is no longer a store field; peel & stick is standard for every quote now. */}
-            <SummaryRow label="Underlayment" value={UNDERLAYMENT_SUMMARY['peel-stick']} />
+            <SummaryRow label="Underlayment" value="Premium Peel & Stick" />
             <SummaryRow label="Protection level" value={guaranteeInfo.level} />
             <SummaryRow label="Workmanship guarantee" value={`${guaranteeInfo.years} years`} />
             <SummaryRow label="Property" value={address ?? 'Not provided'} />

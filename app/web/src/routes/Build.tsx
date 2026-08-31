@@ -5,15 +5,11 @@ import ProgressRail from './build/ProgressRail';
 import { StepTransition } from './build/motion';
 import { STEP_IDS, maxAllowedIndex, stepIdFromHash, stepIndex, type StepId } from './build/steps';
 import { getStepFlags, setStepFlagDone } from './build/useStepFlags';
-import StepAddress from './build/StepAddress';
-import AddressChip from './build/AddressChip';
 import StepHome from './build/StepHome';
+import AddressChip from './build/AddressChip';
 import StepShingle from './build/StepShingle';
-import StepColor from './build/StepColor';
-import StepUnderlayment from './build/StepUnderlayment';
-import StepProtection from './build/StepProtection';
+import StepAppearance from './build/StepAppearance';
 import StepIncluded from './build/StepIncluded';
-import StepFinishing from './build/StepFinishing';
 import StepReview from './build/StepReview';
 
 function goBack() {
@@ -26,16 +22,16 @@ export default function Build() {
   // clamp-and-sync logic below needs to re-run whenever the store changes.
   const buildState = useBuild();
   const resetQuote = useBuild((s) => s.resetQuote);
-  const [currentId, setCurrentId] = useState<StepId>('address');
+  const [currentId, setCurrentId] = useState<StepId>('home');
 
   // Deliberately never assigns `location.hash = ...`: that's a real
   // navigation as far as the browser is concerned, and it triggers the
   // native "scroll to the element whose id matches the fragment" behavior
-  // (this is exactly what caused the cold-load scroll-jump on Address,
-  // whose input id used to collide with the #address hash). The History
-  // API's pushState/replaceState update the URL bar without ever
-  // triggering that scroll-into-view, regardless of whether some future
-  // element id happens to collide with a step hash.
+  // (this is exactly what caused the cold-load scroll-jump on Home, whose
+  // input id used to collide with the #home hash). The History API's
+  // pushState/replaceState update the URL bar without ever triggering that
+  // scroll-into-view, regardless of whether some future element id happens
+  // to collide with a step hash.
   const applyStep = useCallback((desiredId: StepId | null, opts: { replace: boolean }) => {
     const allowedIndex = maxAllowedIndex(useBuild.getState(), getStepFlags());
     const desiredIndex = desiredId ? stepIndex(desiredId) : allowedIndex;
@@ -54,6 +50,9 @@ export default function Build() {
   // unlock a further step): re-clamp against whatever's in the URL hash.
   // Always a *replace* -- this is normalizing/redirecting, not a user
   // navigation, so it shouldn't create a Back-able history entry.
+  // stepIdFromHash resolves old (pre-round-8) hashes -- #address, #color,
+  // #finishing, #underlayment, #protection -- to their new home so an old
+  // bookmark or shared link still lands somewhere sane.
   useEffect(() => {
     applyStep(stepIdFromHash(window.location.hash), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -82,10 +81,10 @@ export default function Build() {
   }
 
   // "Start over" (rail + Review's quiet link): resetQuote() alone is enough
-  // to land back on Address -- it changes buildState, which the clamp-and-
+  // to land back on Home -- it changes buildState, which the clamp-and-
   // sync effect above already reacts to on every store change (address is
   // now null, so maxAllowedIndex clamps to 0 and rewrites the URL hash to
-  // #address via replaceState). No separate navigation call needed here.
+  // #home via replaceState). No separate navigation call needed here.
   function handleStartOver() {
     resetQuote();
   }
@@ -109,8 +108,11 @@ export default function Build() {
           onStepClick={goToStep}
           onStartOver={isPristine ? undefined : handleStartOver}
         />
-        {currentId !== 'address' && buildState.address && (
-          <AddressChip address={buildState.address} onChange={() => goToStep('address')} />
+        {/* Home absorbs address entry/display itself (its own inline
+            AddressChip); every other step past it keeps this one, jumping
+            back to Home on "Change". */}
+        {currentId !== 'home' && buildState.address && (
+          <AddressChip address={buildState.address} onChange={() => goToStep('home')} />
         )}
         <main
           className="mx-auto max-w-4xl px-4 py-10 md:px-6 md:py-14"
@@ -129,46 +131,22 @@ export default function Build() {
 
 function renderStep(id: StepId, goToStep: (id: StepId) => void, onStartOver: () => void) {
   switch (id) {
-    case 'address':
-      return <StepAddress onContinue={() => goToStep('home')} />;
     case 'home':
-      return <StepHome onContinue={() => goToStep('shingle')} onBack={goBack} />;
+      return <StepHome onContinue={() => goToStep('shingle')} />;
     case 'shingle':
-      return <StepShingle onContinue={() => goToStep('color')} onBack={goBack} />;
-    case 'color':
-      return <StepColor onContinue={() => goToStep('underlayment')} onBack={goBack} />;
-    case 'underlayment':
-      return (
-        <StepUnderlayment
-          onContinue={() => {
-            setStepFlagDone('underlayment');
-            goToStep('protection');
-          }}
-          onBack={goBack}
-        />
-      );
-    case 'protection':
-      return (
-        <StepProtection
-          onContinue={() => {
-            setStepFlagDone('protection');
-            goToStep('included');
-          }}
-          onBack={goBack}
-        />
-      );
+      return <StepShingle onContinue={() => goToStep('appearance')} onBack={goBack} />;
+    case 'appearance':
+      return <StepAppearance onContinue={() => goToStep('included')} onBack={goBack} />;
     case 'included':
       return (
         <StepIncluded
           onContinue={() => {
             setStepFlagDone('included');
-            goToStep('finishing');
+            goToStep('review');
           }}
           onBack={goBack}
         />
       );
-    case 'finishing':
-      return <StepFinishing onContinue={() => goToStep('review')} onBack={goBack} />;
     case 'review':
       return <StepReview onEdit={() => goToStep('shingle')} onStartOver={onStartOver} />;
     default:
