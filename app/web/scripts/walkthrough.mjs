@@ -505,17 +505,25 @@ async function checkSatelliteConfirmAmberNotice(browser, width, height) {
   }
   console.log(`  [satellite confirm @ ${width}x${height}] "Adjust it." prompt + prominent Adjust outline button verified`);
 
-  // Feedback round 8: confirming here must NOT navigate away -- it commits
-  // the outline and reveals the solar question below, on the same step.
-  await page.getByRole('button', { name: 'Looks right, continue' }).click();
-  await page.getByText('Do you have solar panels on your roof?').waitFor({ timeout: 2000 });
-  await assertStillOnStep(page, 'home', `satellite confirm @ ${width}x${height}: confirming stays on Home`);
-
   // The mocked aerial image pushes the notice below the fold on shorter
   // viewports -- scroll it into view so the screenshot actually shows the
-  // thing it exists to capture, not just the image above it.
+  // thing it exists to capture, not just the image above it. Taken BEFORE
+  // confirming: the confirm card (and its notice) collapses on confirm.
   await amberNotice.scrollIntoViewIfNeeded();
   await screenshotNamed(page, 'home-confirm-amber', width);
+
+  // Confirming must NOT navigate away -- it collapses the confirm card to
+  // the confirmed row and reveals the solar question, on the same step
+  // (client feedback 2026-08-31: no second live primary button remains).
+  await page.getByRole('button', { name: 'Use this outline' }).click();
+  await page.getByText('Roof size confirmed.').waitFor({ timeout: 2000 });
+  await page.getByText('Do you have solar panels on your roof?').waitFor({ timeout: 2000 });
+  await assertStillOnStep(page, 'home', `satellite confirm @ ${width}x${height}: confirming stays on Home`);
+  const staleConfirm = await page.getByRole('button', { name: 'Use this outline' }).count();
+  if (staleConfirm !== 0) {
+    fail(`[satellite confirm @ ${width}x${height}] confirm card did not collapse after "Use this outline"`);
+  }
+  await screenshotNamed(page, 'home-confirmed-questions', width);
 
   await context.close();
 }
@@ -688,9 +696,10 @@ async function checkTraceMode(browser, width, height) {
   await screenshotNamed(page, 'home-trace', width);
 
   await page.getByRole('button', { name: 'Use this outline' }).click();
+  await page.getByText('Roof size confirmed.').waitFor({ timeout: 2000 });
   await page.getByText('Do you have solar panels on your roof?').waitFor({ timeout: 2000 });
   await assertStillOnStep(page, 'home', `trace mode @ ${width}x${height}: using the outline stays on Home`);
-  console.log(`  [trace mode @ ${width}x${height}] "Use this outline" commits without navigating`);
+  console.log(`  [trace mode @ ${width}x${height}] "Use this outline" collapses to confirmed without navigating`);
 
   await page.getByRole('button', { name: 'No solar panels' }).click();
   await page.getByRole('button', { name: 'Continue' }).click();

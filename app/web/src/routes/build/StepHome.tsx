@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useBuild } from '../../state/build';
 import { validateFloridaAddress } from '../../lib/address';
 import {
@@ -33,7 +33,7 @@ type Phase =
   // `adjusted`: whether this sqft has already been committed to the store
   // via setOutlineAdjusted (true, from the outline editor's "Use this
   // outline") vs. still-unconfirmed fresh satellite output (false) that
-  // "Looks right, continue" still needs to commit via setOutlineFromSatellite.
+  // "Use this outline" still needs to commit via setOutlineFromSatellite.
   | { kind: 'confirm'; sqft: number; imageUrl?: string; mapMeta?: MapMeta; adjusted: boolean }
   // Entered via "Adjust outline"; sqft/adjusted here are what Cancel
   // reverts to (the confirm phase's own state at the moment of entry).
@@ -49,6 +49,11 @@ type Phase =
   // 'editor' above.
   | { kind: 'trace'; imageUrl: string; mapMeta: MapMeta; corners: LatLngCorner[] }
   | { kind: 'form' }
+  // Outline committed (any source): the confirm/trace/manual UI collapses
+  // to a compact confirmed row and the property questions become the focus
+  // (client feedback 2026-08-31: two live primary buttons on one screen read
+  // as "the button does not work"). Renders entirely from the store.
+  | { kind: 'confirmed' }
   | { kind: 'outside-florida' };
 
 // Client pricing-display rule: the satellite-measured FOOTPRINT sq ft may be
@@ -128,7 +133,9 @@ function hasTraceImagery(d: {
 //  - otherwise -> kick off the loading phase, which the effect below turns
 //    into exactly one fetch.
 function initialPhase(address: string | null, savedOutline: number | null): Phase {
-  if (savedOutline != null) return { kind: 'form' };
+  // An already-committed outline collapses straight to the confirmed row --
+  // a return visit answers the questions, it does not re-confirm the roof.
+  if (savedOutline != null) return { kind: 'confirmed' };
   if (!address || !address.trim()) return { kind: 'form' };
 
   const attempt = getMeasurementAttempt();
@@ -357,6 +364,25 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
   // has, no need to know about expiry.
   const [imgFailed, setImgFailed] = useState(false);
 
+  // The property questions block must be visibly the next action the moment
+  // the outline collapses to confirmed -- on shorter screens it renders
+  // below the fold, which read as "the confirm button did nothing" (client
+  // feedback 2026-08-31). Only on the TRANSITION into confirmed: a return
+  // visit that mounts directly into it should not jump the page around.
+  const questionsRef = useRef<HTMLDivElement>(null);
+  const prevPhaseKindRef = useRef(phase.kind);
+  useEffect(() => {
+    const prev = prevPhaseKindRef.current;
+    prevPhaseKindRef.current = phase.kind;
+    if (phase.kind !== 'confirmed' || prev === 'confirmed') return;
+    const el = questionsRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [phase.kind]);
+
   // Keep the store's propertyImageUrl in sync with whatever the confirm
   // phase is showing, whether that's a fresh fetch or a cached attempt
   // restored on mount -- one place, instead of duplicating the store write.
@@ -503,6 +529,7 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
   function handleContinue() {
     if (!isValid) return;
     setOutline(numeric);
+    setPhase({ kind: 'confirmed' });
   }
 
   function handleConfirmSatellite(sqft: number, adjusted: boolean) {
@@ -511,6 +538,27 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
     // here via setOutlineFromSatellite would wrongly overwrite
     // outlineSource back to 'satellite'.
     if (!adjusted) setOutlineFromSatellite(sqft);
+    setPhase({ kind: 'confirmed' });
+  }
+
+  // "Change" on the confirmed row: reopen whichever flow produced the
+  // committed outline. Manual values reopen the (still prefilled) form;
+  // image-derived ones reopen the confirm card from the store's own
+  // mapMeta/corners/image, tagged adjusted so re-confirming never
+  // overwrites outlineSource back to 'satellite'.
+  function handleChangeOutline() {
+    const state = useBuild.getState();
+    if (state.outlineSource === 'manual' || !state.propertyImageUrl) {
+      setPhase({ kind: 'form' });
+      return;
+    }
+    setPhase({
+      kind: 'confirm',
+      sqft: state.outlineSqft ?? 0,
+      imageUrl: state.propertyImageUrl,
+      mapMeta: state.mapMeta ?? undefined,
+      adjusted: state.outlineSource === 'adjusted',
+    });
   }
 
   function handlePreferManual() {
@@ -541,6 +589,7 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
   // homeowner-drawn outline (feedback round 7, Task C item 2).
   function handleApplyTrace(sqft: number, corners: LatLngCorner[]) {
     setOutlineAdjusted(sqft, corners);
+    setPhase({ kind: 'confirmed' });
   }
 
   // State A: address entry, exactly today's behavior. No BackChevron here --
@@ -614,6 +663,47 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
           >
             <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-600/30 border-t-blue-600" />
             <p className="text-base text-ink/70">Sizing your roof from satellite imagery...</p>
+          </div>
+        </RevealItem>
+      </>
+    );
+  } else if (phase.kind === 'confirmed') {
+    // Compact confirmed row: check, the (display-rounded) footprint, and a
+    // Change link. Manual values render exactly as typed; image-derived
+    // ones keep the same authorized rounded display as the confirm card.
+    const detail =
+      savedOutline == null
+        ? null
+        : outlineSource === 'manual'
+          ? `${Math.round(savedOutline).toLocaleString('en-US')} sq ft footprint.`
+          : `About ${formatFootprintSqft(savedOutline)} sq ft footprint.`;
+    phaseNode = (
+      <>
+        <RevealItem>
+          <BackChevron onClick={reopenAddressEntry} />
+          <StepHeading
+            eyebrow="Your home"
+            title="Confirm your home's size"
+            subtitle="You can find your home's footprint on your county property appraiser's site."
+          />
+        </RevealItem>
+        <RevealItem>
+          <div className="flex max-w-sm items-center justify-between gap-3 rounded-xl bg-white p-4">
+            <div className="flex items-start gap-3">
+              <CheckMark className="mt-0.5 h-6 w-6 shrink-0 text-blue-600" />
+              <div>
+                <p className="font-display text-lg font-medium text-navy-950">Roof size confirmed.</p>
+                {detail && <p className="mt-0.5 text-sm text-ink/70">{detail}</p>}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleChangeOutline}
+              aria-label="Change roof size"
+              className="min-h-[44px] shrink-0 text-sm font-medium text-blue-600 underline-offset-2 hover:underline"
+            >
+              Change
+            </button>
           </div>
         </RevealItem>
       </>
@@ -736,7 +826,7 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
         <RevealItem>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <PrimaryButton onClick={() => handleConfirmSatellite(phase.sqft, phase.adjusted)}>
-              Looks right, continue
+              Use this outline
             </PrimaryButton>
             {canAdjustOutline && (
               <ProminentSecondaryButton type="button" onClick={handleAdjustOutline}>
@@ -825,7 +915,7 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
           exists. This is the only Continue that advances past Home. */}
       {sq != null && (
         <RevealItem>
-          <div className="mt-10 max-w-md border-t border-navy-950/10 pt-8">
+          <div ref={questionsRef} tabIndex={-1} className="mt-10 max-w-md border-t border-navy-950/10 pt-8 outline-none">
             <StepHeading eyebrow="A couple quick questions" title="Tell us about your property" />
             <SolarQuestion value={solarPanels} onChange={setSolarPanels} />
             <PrimaryButton className="mt-6" disabled={sq == null || solarPanels == null} onClick={onContinue}>

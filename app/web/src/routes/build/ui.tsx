@@ -103,7 +103,7 @@ export function PrimaryButton({
 /**
  * Prominent bordered peer action (feedback round 7, Task C item 3): a
  * heavier weight than SecondaryLinkButton's quiet pill, so "Adjust outline"
- * on the confirm card reads as a real peer action next to "Looks right,
+ * on the confirm card reads as a real peer action next to "Use this outline"
  * continue" -- not an easily-missed ghost link (Kyle: outline adjustment
  * needs to be noticeable). Solid navy border + text on white, the same
  * pill shape and min-height as every other button here.
