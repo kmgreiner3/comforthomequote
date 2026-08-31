@@ -80,9 +80,15 @@ export function buildVertexEditPrompt(
   dripEdge?: DripEdgeColor,
 ): string {
   const firstSentence = (description.split('.')[0] ?? '').trim().toLowerCase();
+  // The texture sentence is load-bearing: without it, light colors (Desert
+  // Sand, Glacier White) come back as a smooth flat-painted roof with no
+  // shingle pattern at all (client report 2026-08-31).
   let prompt =
     `Edit this photo: replace the roof shingles with ${colorName.toLowerCase()} architectural asphalt shingles, ` +
-    `${firstSentence}. Keep the house structure, walls, windows, landscaping, lighting, and sky exactly the same. Photorealistic.`;
+    `${firstSentence}. The new roof must show clearly visible individual architectural shingle tabs with ` +
+    `staggered edges, dimensional layering, and granular asphalt texture on every roof plane, never a smooth ` +
+    `or flat painted surface. Keep the house structure, walls, windows, landscaping, lighting, and sky ` +
+    `exactly the same. Photorealistic.`;
   if (dripEdge) {
     prompt += ` Also change the drip edge trim along the roof edges to ${dripEdge.toLowerCase()}.`;
   }

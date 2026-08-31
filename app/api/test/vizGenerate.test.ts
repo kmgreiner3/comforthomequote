@@ -103,7 +103,7 @@ describe('vizGenerate handler', () => {
     expect(bedrockMock.commandCalls(InvokeModelCommand)).toHaveLength(1);
     const putCalls = s3Mock.commandCalls(PutObjectCommand);
     expect(putCalls).toHaveLength(1);
-    expect(putCalls[0]?.args[0].input.Key).toBe(`renders/v2/${UPLOAD_ID}/tamko-titan-xt/rustic-black.png`);
+    expect(putCalls[0]?.args[0].input.Key).toBe(`renders/v3/${UPLOAD_ID}/tamko-titan-xt/rustic-black.png`);
     expect(putCalls[0]?.args[0].input.ContentType).toBe('image/png');
 
     const invokeCall = bedrockMock.commandCalls(InvokeModelCommand)[0];
@@ -157,8 +157,8 @@ describe('vizGenerate handler', () => {
     const putCalls = s3Mock.commandCalls(PutObjectCommand);
     expect(putCalls).toHaveLength(2);
     const keys = putCalls.map((c) => c.args[0].input.Key);
-    expect(keys[0]).toBe(`renders/v2/${UPLOAD_ID}/tamko-titan-xt/rustic-black.png`);
-    expect(keys[1]).toBe(`renders/v2/${UPLOAD_ID}/tamko-titan-xt/rustic-black-black.png`);
+    expect(keys[0]).toBe(`renders/v3/${UPLOAD_ID}/tamko-titan-xt/rustic-black.png`);
+    expect(keys[1]).toBe(`renders/v3/${UPLOAD_ID}/tamko-titan-xt/rustic-black-black.png`);
     expect(keys[0]).not.toBe(keys[1]);
   });
 
