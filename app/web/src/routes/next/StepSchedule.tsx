@@ -17,12 +17,17 @@ export default function StepSchedule({ onContinue, onBack }: { onContinue: () =>
   const saved = useBuild((s) => s.visit);
   const setVisit = useBuild((s) => s.setVisit);
 
-  // Not a store selector: "7 days from today" is a pure function of the
-  // current date, recomputed fresh each mount rather than persisted.
-  const minDate = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return toISODate(d);
+  // Feedback round 8, item 15: the window is tomorrow through today+7
+  // inclusive (today itself is rejected -- not enough lead time to
+  // schedule a visit). Not a store selector: both bounds are a pure
+  // function of the current date, recomputed fresh each mount rather than
+  // persisted.
+  const { minDate, maxDate } = useMemo(() => {
+    const min = new Date();
+    min.setDate(min.getDate() + 1);
+    const max = new Date();
+    max.setDate(max.getDate() + 7);
+    return { minDate: toISODate(min), maxDate: toISODate(max) };
   }, []);
 
   const [date, setDate] = useState(saved?.date ?? '');
@@ -33,7 +38,7 @@ export default function StepSchedule({ onContinue, onBack }: { onContinue: () =>
     e.preventDefault();
     const next: { date?: string; window?: string } = {};
     if (!date) next.date = 'Choose a date for your visit.';
-    else if (date < minDate) next.date = 'Choose a date at least 7 days from today.';
+    else if (date < minDate || date > maxDate) next.date = 'Choose a date within the next 7 days.';
     if (!windowValue) next.window = 'Choose a preferred time window.';
     setErrors(next);
     if (Object.keys(next).length > 0) return;
@@ -63,13 +68,14 @@ export default function StepSchedule({ onContinue, onBack }: { onContinue: () =>
             label="Visit date"
             htmlFor="visit-date"
             error={errors.date}
-            hint="At least 7 days from today."
+            hint="Choose a date within the next 7 days."
           >
             <input
               id="visit-date"
               name="visit-date"
               type="date"
               min={minDate}
+              max={maxDate}
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className={inputClass}

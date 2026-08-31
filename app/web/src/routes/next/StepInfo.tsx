@@ -28,7 +28,13 @@ export default function StepInfo({ onContinue, onBack }: { onContinue: () => voi
   const [name, setName] = useState(saved?.name ?? '');
   const [phone, setPhone] = useState(saved?.phone ?? '');
   const [email, setEmail] = useState(saved?.email ?? '');
-  const [billing, setBilling] = useState(saved?.billing ?? '');
+  // Feedback round 8, item 16: "Same as the address where work is being
+  // done" mirrors the property address into billing (read-only) while
+  // checked. `billingDraft` keeps whatever was manually typed BEFORE
+  // checking, so unchecking restores it exactly rather than clearing it.
+  const [sameAsProperty, setSameAsProperty] = useState(false);
+  const [billingDraft, setBillingDraft] = useState(saved?.billing ?? '');
+  const billing = sameAsProperty ? address ?? '' : billingDraft;
   const [method, setMethod] = useState(saved?.method ?? '');
   const [errors, setErrors] = useState<FormErrors>({});
 
@@ -124,15 +130,27 @@ export default function StepInfo({ onContinue, onBack }: { onContinue: () => voi
             />
           </Field>
 
+          <label className="flex min-h-[44px] items-center gap-2 text-sm text-ink/80">
+            <input
+              id="info-billing-same-as-property"
+              type="checkbox"
+              checked={sameAsProperty}
+              onChange={(e) => setSameAsProperty(e.target.checked)}
+              className="h-4 w-4 rounded border-2 border-navy-950/30 text-blue-600 focus:ring-blue-600"
+            />
+            Same as the address where work is being done
+          </label>
+
           <Field label="Billing address" htmlFor="info-billing" error={errors.billing}>
             <input
               id="info-billing"
               name="billing-address"
               type="text"
               autoComplete="billing street-address"
+              readOnly={sameAsProperty}
               value={billing}
-              onChange={(e) => setBilling(e.target.value)}
-              className={inputClass}
+              onChange={(e) => setBillingDraft(e.target.value)}
+              className={`${inputClass} ${sameAsProperty ? 'cursor-not-allowed bg-sky-50 text-ink/60' : ''}`}
             />
           </Field>
 

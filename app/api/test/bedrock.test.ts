@@ -27,6 +27,16 @@ describe('buildVisualizePrompt', () => {
     expect(prompt.startsWith('architectural asphalt shingle roof in Desert Sand:')).toBe(true);
     expect(prompt).toContain('photorealistic, keep the rest of the house unchanged');
   });
+
+  it('feedback round 8: appends the drip edge trim mention when given', () => {
+    const prompt = buildVisualizePrompt('Rustic Black', 'A bold blend of black tones.', 'White');
+    expect(prompt).toContain('with White drip edge trim');
+  });
+
+  it('omits any drip edge mention when not given', () => {
+    const prompt = buildVisualizePrompt('Rustic Black', 'A bold blend of black tones.');
+    expect(prompt).not.toContain('drip edge');
+  });
 });
 
 describe('buildInPaintingRequest', () => {
@@ -42,6 +52,11 @@ describe('buildInPaintingRequest', () => {
       },
       imageGenerationConfig: { numberOfImages: 1, quality: 'standard', cfgScale: 7 },
     });
+  });
+
+  it('feedback round 8: passes the drip edge color through into the prompt text', () => {
+    const request = buildInPaintingRequest('base64img', 'Rustic Black', 'A bold blend of black tones.', 'Brown');
+    expect(request.inPaintingParams.text).toContain('with Brown drip edge trim');
   });
 });
 

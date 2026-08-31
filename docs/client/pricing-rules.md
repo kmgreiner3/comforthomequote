@@ -45,21 +45,27 @@ Anchors: 5→$5,000 · 10→$7,500 · 24→$13,200 · 35→$18,400 · 50→$25,0
 
 **Titan upgrade display:** compute both systems for the exact measurement; customer sees only the difference: `Upgrade to Titan XT +$1,200`.
 
-## Underlayment
+## Underlayment (feedback round 8: peel & stick is now standard, synthetic discontinued)
 
-- Synthetic: included, $0.
-- Full Peel & Stick: internal `exact SQ × $50`, round up (27.43 × 50 = 1,371.50 → **$1,372**). Adds **+5 years** workmanship guarantee. Never show "$50/SQ".
+- Full Peel & Stick is standard on every quote, no opt-in and no separate line item. Internal `exact SQ × $50`, round up (27.43 × 50 = 1,371.50 → **$1,372**), baked directly into every configured total. Never show "$50/SQ", and never show this as a separate underlayment choice -- the homeowner-facing copy is just "Peel and stick underlayment: Included".
+- Synthetic underlayment is discontinued. We no longer offer it.
 
-## Workmanship guarantee matrix
+## Solar panel removal and reinstall (feedback round 8, new)
 
-| Shingle | Underlayment | Guarantee |
-|---|---|---:|
-| IKO Cambridge | Synthetic | 5 years (BETTER) |
-| IKO Cambridge | Peel & Stick | 10 years (BETTER+) |
-| Titan XT | Synthetic | 10 years (BEST) |
-| Titan XT | Peel & Stick | 15 years (BEST+) |
+- Asked as a property question once the roof outline is confirmed: does the home have solar panels, and if so, how many (1-60)?
+- $200 per panel, covering removal by a licensed solar contractor before the project and reinstall after. This is a countable, homeowner-entered unit (not an internal per-SQ rate), so "$200 per panel" IS authorized to display at that question.
+- 0 panels (explicitly answered "No") costs $0 and is not shown as a line item on Review. A non-zero count shows as "Solar panel removal and reinstall (N panels): +$X".
 
-Manufacturer warranties stay separate from workmanship guarantee. Wind language: "Up to 130 MPH Limited High-Wind Warranty when installed according to applicable IKO requirements*" / "Up to 160 MPH Limited Wind Warranty when installed according to applicable TAMKO high-wind requirements*". Never say "130/160 MPH rated".
+## Workmanship guarantee (feedback round 8: keyed on shingle alone)
+
+Peel & stick is standard for everyone now, so it no longer changes the guarantee. Guarantee is just the shingle's own workmanship years:
+
+| Shingle | Guarantee |
+|---|---:|
+| IKO Cambridge | 5 years (BETTER) |
+| Titan XT | 10 years (BEST) |
+
+Manufacturer warranties stay separate from workmanship guarantee. Wind language: "Up to 130 MPH Limited High-Wind Warranty when installed according to applicable IKO requirements*" / "Up to 160 MPH Limited Wind Warranty when installed according to applicable TAMKO high-wind requirements*". Never say "130/160 MPH rated". TAMKO's Limited Lifetime manufacturer warranty applies to single-family residences only; the footnote must carry that qualifier wherever TAMKO's warranty is mentioned.
 
 ## Decking
 
@@ -68,7 +74,7 @@ First 5 sheets included; `MAX(sheets − 5, 0) × $78` as a potential post-tear-
 ## Financing & cash
 
 - Finance: rule of thumb **$10/month per $1,000** ($17,000 → ~$170/mo). $0 down, no prepayment penalty, first payment ≥1 month after completion, 6.99% lowest APR. Always "approximately", with lender disclosure.
-- Cash: **5% discount** — half upfront, half on completion.
+- Cash: **5% discount**. Pay schedule wording (feedback round 8): "Pay cash: $X (5% discount)" as its own line, then "Pay schedule: 50% on signing, 50% on completion" as a second line — kept separate rather than run together.
 
 ## Shingle colors
 
@@ -87,8 +93,12 @@ Eagle Tile $1,300/SQ. Same UHT underlayment. 20-year labor+material guarantee (t
 
 ## Data collection rule (fundamental)
 
-Before "I'm Ready to Move Forward": property address ONLY. No name/phone/email. After: full name, phone, email, property address, billing address, preferred contact method, pre-installation appointment.
+Before "I'm Ready to Move Forward": property address ONLY. No name/phone/email. After: full name, phone, email, property address, billing address (or "Same as the address where work is being done", feedback round 8), preferred contact method, pre-installation appointment within 7 days (feedback round 8: tomorrow through today+7 inclusive; today itself is not offered).
 
 ## Future (admin-driven pricing)
 
 Pricing must not be hard-coded into frontend components long-term; bands/products/counties/contractors become backend-configurable. County → one assigned contractor partner.
+
+## Pending (Dylan's Aug 30 2026 Sunday email)
+
+Dylan's Sunday email listed additional property questions to ask alongside solar (beyond just panel count) for a future round. Not yet scoped or priced -- tracked here as pending, not implemented. See `app/web/src/content/propertyQuestions.ts`'s own note for where they'll plug in once ready.
