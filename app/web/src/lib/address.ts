@@ -47,3 +47,12 @@ export function validateFloridaAddress(input: string): AddressValidation {
 
   return { ok: true };
 }
+
+// Whether a Google suggestion description is a Florida address. Suggestions
+// are biased to Florida but no longer restricted to it (client decision
+// 2026-09-01): an out-of-state pick gets a soft "Florida only" notice at
+// selection time instead of a silently empty dropdown or the hard
+// outside-florida dead end after a wasted measure call.
+export function isFloridaSuggestion(description: string): boolean {
+  return /, FL(,| |$)/.test(description);
+}

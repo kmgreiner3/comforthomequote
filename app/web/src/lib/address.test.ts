@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateFloridaAddress } from './address';
+import { isFloridaSuggestion, validateFloridaAddress } from './address';
 
 describe('validateFloridaAddress', () => {
   it('accepts a full Sarasota address with ZIP', () => {
@@ -71,5 +71,17 @@ describe('validateFloridaAddress', () => {
       ok: false,
       error: 'We currently serve Florida homes only.',
     });
+  });
+});
+
+describe('isFloridaSuggestion', () => {
+  it.each([
+    ['8491 60th Street, Pinellas Park, FL, USA', true],
+    ['1530 Main St, Sarasota, FL 34236, USA', true],
+    ['123 Peachtree St NE, Atlanta, GA, USA', false],
+    ['1530 Main St, Dallas, TX, USA', false],
+    ['Flagler Ave, New Smyrna Beach, USA', false], // "FL" inside a word never matches
+  ])('%s -> %s', (description, expected) => {
+    expect(isFloridaSuggestion(description)).toBe(expected);
   });
 });

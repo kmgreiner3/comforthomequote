@@ -69,7 +69,7 @@ describe('address-suggest handler', () => {
     expect(JSON.parse(res.body as string)).toEqual({ available: false });
   });
 
-  it('returns up to 5 FL-filtered {description, placeId} suggestions', async () => {
+  it('returns up to 5 {description, placeId} suggestions, out-of-state included (bias, not restriction)', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: 'real-key' } });
     vi.stubGlobal(
       'fetch',
@@ -82,7 +82,10 @@ describe('address-suggest handler', () => {
     );
     const res = await handler(eventForBody({ input: '1530 Main St Sar', sessionToken: 'tok-1' }));
     expect(JSON.parse(res.body as string)).toEqual({
-      suggestions: [{ description: '1530 Main St, Sarasota, FL, USA', placeId: 'place-fl-1' }],
+      suggestions: [
+        { description: '1530 Main St, Sarasota, FL, USA', placeId: 'place-fl-1' },
+        { description: '1530 Main St, Atlanta, GA, USA', placeId: 'place-ga-1' },
+      ],
     });
   });
 

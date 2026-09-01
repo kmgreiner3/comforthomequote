@@ -116,6 +116,37 @@ export default function StepReview({
               <StartOverLink onConfirm={onStartOver} />
             </div>
           </div>
+
+          {/* Dylan's wording (2026-09-01), condensed to the site's copy
+              rules. Below the CTA on purpose: trust reinforcement, never
+              something that pushes the button further down. */}
+          <div className="mt-8 rounded-2xl border-2 border-navy-950/10 bg-white p-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+              Your price, confirmed
+            </p>
+            <p className="mt-3 font-display text-lg font-medium text-navy-950">
+              99% of the time, your online price is your final price.
+            </p>
+            <div className="mt-3 space-y-3 text-sm leading-relaxed text-ink/70">
+              <p>
+                We&apos;ve put extensive testing into our measurement and pricing system, and
+                we&apos;re confident in its accuracy. In nearly every case, the price you see here
+                is the price you&apos;ll pay.
+              </p>
+              <p>
+                Before installation, our project manager visits your home for a brief
+                pre-installation inspection: photos, a final walkthrough, and confirming the
+                condition of your roof before work begins.
+              </p>
+              <p>
+                While uncommon, some conditions can&apos;t be identified from aerial measurements
+                or online property data, like hidden wood, fascia, or soffit damage, or areas
+                obstructed by trees or heavy vegetation. If anything would require a price
+                adjustment, we&apos;ll discuss it with you before installation begins. No surprise
+                changes.
+              </p>
+            </div>
+          </div>
         </div>
       </RevealItem>
     </RevealGroup>

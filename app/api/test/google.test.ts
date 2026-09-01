@@ -453,10 +453,16 @@ describe('suggestAddresses', () => {
       input: '1530 Main St Sar',
       sessionToken: 'session-abc',
       includedRegionCodes: ['us'],
+      locationBias: {
+        rectangle: {
+          low: { latitude: 24.396308, longitude: -87.634896 },
+          high: { latitude: 31.000968, longitude: -79.974306 },
+        },
+      },
     });
   });
 
-  it('filters results to Florida (description contains ", FL") and maps to {description, placeId}', async () => {
+  it('keeps out-of-state results (bias, not restriction -- the client shows the Florida-only notice on selection)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -472,6 +478,7 @@ describe('suggestAddresses', () => {
 
     expect(result).toEqual([
       { description: '1530 Main St, Sarasota, FL, USA', placeId: 'place-fl-1' },
+      { description: '1530 Main St, Atlanta, GA, USA', placeId: 'place-ga-1' },
       { description: '1531 Main St, Tampa, FL, USA', placeId: 'place-fl-2' },
     ]);
   });
@@ -500,12 +507,9 @@ describe('suggestAddresses', () => {
     expect(result).toBeNull();
   });
 
-  it('returns an empty array (not null) for a successful call with no Florida matches', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(suggestionsResponse([{ text: '1 Main St, Atlanta, GA, USA', placeId: 'place-ga' }])),
-    );
-    const result = await suggestAddresses('1 Main St', undefined, 'fake-key');
+  it('returns an empty array (not null) for a successful call with no predictions at all', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(suggestionsResponse([])));
+    const result = await suggestAddresses('zzzz', undefined, 'fake-key');
     expect(result).toEqual([]);
   });
 });
