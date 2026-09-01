@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useBuild } from '../state/build';
 import { FINANCING_DISCLOSURE } from '../content/footnote';
-import { validateFloridaAddress } from '../lib/address';
+import { isFloridaSuggestion, validateFloridaAddress } from '../lib/address';
 import AddressCombobox from '../components/AddressCombobox';
 
 const TRUST_POINTS = [
@@ -36,6 +36,9 @@ export default function Landing() {
   const [value, setValue] = useState('');
   const [placeId, setPlaceId] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
+  // Soft notice on picking an out-of-state suggestion (bias-not-restrict,
+  // 2026-09-01). Submitting stays blocked while it shows.
+  const [outOfState, setOutOfState] = useState(false);
 
   const trimmed = value.trim();
   const validation = validateFloridaAddress(value);
@@ -43,19 +46,23 @@ export default function Landing() {
   function handleValueChange(next: string) {
     setValue(next);
     setPlaceId(null); // any manual edit invalidates a previously picked suggestion
+    setOutOfState(false);
   }
 
   function handleSelectSuggestion(description: string, selectedPlaceId: string) {
     setValue(description);
     setPlaceId(selectedPlaceId);
+    setOutOfState(!isFloridaSuggestion(description));
   }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setTouched(true);
     // A picked suggestion is Google-canonicalized -- skip the client-side
-    // format check and trust it directly.
+    // format check and trust it directly. An out-of-state pick stays on
+    // the soft notice instead of burning a measure call on a dead end.
     if (placeId) {
+      if (outOfState) return;
       setAddress(trimmed, placeId);
       navigate('/build');
       return;
@@ -108,6 +115,7 @@ export default function Landing() {
           {touched && !placeId && !validation.ok && (
             <p className="mt-3 text-sm text-amber-400">{validation.error}</p>
           )}
+          {outOfState && <p className="mt-3 text-sm text-amber-400">We only serve Florida homes at this time.</p>}
           <p className="mt-3 text-sm text-sky-50/60">
             Serving Florida homeowners. Enter your full address with ZIP code.
           </p>

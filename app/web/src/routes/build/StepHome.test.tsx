@@ -94,6 +94,58 @@ describe('StepHome: address entry (state A, feedback round 8 -- Home absorbs Add
   });
 });
 
+describe('StepHome: out-of-state suggestion gets the soft Florida-only notice (2026-09-01)', () => {
+  async function typeAndOpenSuggestions(descriptions: Array<{ description: string; placeId: string }>) {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => ({ suggestions: descriptions }) }))
+    );
+    render(<StepHome onContinue={vi.fn()} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, { target: { value: '1530 Main St' } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    return input;
+  }
+
+  it('picking a non-Florida suggestion shows the notice and Build My Roof does not submit', async () => {
+    await typeAndOpenSuggestions([
+      { description: '1530 Main St, Dallas, TX, USA', placeId: 'places/tx' },
+    ]);
+    fireEvent.click(screen.getAllByRole('option')[0]!);
+
+    expect(screen.getByText('We only serve Florida homes at this time.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build My Roof' }));
+    expect(useBuild.getState().address).toBeNull();
+    // Still on address entry, no measuring started.
+    expect(screen.getByRole('combobox')).toBeTruthy();
+  });
+
+  it('a Florida pick never shows the notice, and editing after an out-of-state pick clears it', async () => {
+    await typeAndOpenSuggestions([
+      { description: '1530 Main St, Dallas, TX, USA', placeId: 'places/tx' },
+      { description: '1530 Main St, Sarasota, FL 34236, USA', placeId: 'places/fl' },
+    ]);
+    fireEvent.click(screen.getAllByRole('option')[0]!);
+    expect(screen.getByText('We only serve Florida homes at this time.')).toBeTruthy();
+
+    // Any manual edit clears the notice.
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '1530 Main St S' } });
+    expect(screen.queryByText('We only serve Florida homes at this time.')).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    fireEvent.click(screen.getAllByRole('option')[1]!);
+    expect(screen.queryByText('We only serve Florida homes at this time.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Build My Roof' }));
+    expect(useBuild.getState().address).toBe('1530 Main St, Sarasota, FL 34236, USA');
+  });
+});
+
 describe('StepHome: satellite measurement -> confirm no longer navigates (feedback round 8)', () => {
   it('shows the confirmation card with the rounded footprint, and "Use this outline" commits the outline WITHOUT calling onContinue', async () => {
     const fetchMock = vi.fn(() =>

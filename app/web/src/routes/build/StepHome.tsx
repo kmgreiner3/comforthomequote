@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useBuild } from '../../state/build';
-import { validateFloridaAddress } from '../../lib/address';
+import { isFloridaSuggestion, validateFloridaAddress } from '../../lib/address';
 import {
   AccuracyNotice,
   BackChevron,
@@ -160,6 +160,29 @@ function initialPhase(address: string | null, savedOutline: number | null): Phas
   return { kind: 'loading' };
 }
 
+// Dylan's wording (2026-09-01), condensed to the site's copy rules: how
+// the number on the confirm card / confirmed row came to be. Collapsed by
+// default so the measurement flow stays lean.
+function MeasurementExplainer({ className = '' }: { className?: string }) {
+  return (
+    <details className={`max-w-sm rounded-xl border border-navy-950/10 bg-white ${className}`}>
+      <summary className="min-h-[44px] cursor-pointer list-none px-4 py-3 text-sm font-medium text-blue-600 underline-offset-2 hover:underline">
+        How we calculate your roof size
+      </summary>
+      <div className="px-4 pb-4 text-sm leading-relaxed text-ink/70">
+        <p>
+          Your roof size is calculated from detailed property measurements. We also account for
+          factors like roof pitch and typical material waste, so your estimate reflects the roofing
+          material your project is expected to need.
+        </p>
+        <p className="mt-2">
+          This helps us give you an accurate, realistic price upfront, without surprises later.
+        </p>
+      </div>
+    </details>
+  );
+}
+
 // State A (feedback round 8: Home absorbs address): exactly today's address
 // entry behavior, ported unchanged from the old StepAddress. Its own
 // component so its local input/placeId/touched state resets cleanly every
@@ -176,6 +199,9 @@ function AddressEntry({
   const [value, setValue] = useState(initialValue);
   const [placeId, setPlaceId] = useState<string | null>(initialValue ? initialPlaceId : null);
   const [touched, setTouched] = useState(false);
+  // Soft notice on picking an out-of-state suggestion (bias-not-restrict,
+  // 2026-09-01). Submitting stays blocked while it shows.
+  const [outOfState, setOutOfState] = useState(false);
 
   const trimmed = value.trim();
   const validation = validateFloridaAddress(value);
@@ -183,19 +209,23 @@ function AddressEntry({
   function handleValueChange(next: string) {
     setValue(next);
     setPlaceId(null); // any manual edit invalidates a previously picked suggestion
+    setOutOfState(false);
   }
 
   function handleSelectSuggestion(description: string, selectedPlaceId: string) {
     setValue(description);
     setPlaceId(selectedPlaceId);
+    setOutOfState(!isFloridaSuggestion(description));
   }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setTouched(true);
     // A picked suggestion is Google-canonicalized -- skip the client-side
-    // format check and trust it directly.
+    // format check and trust it directly. An out-of-state pick stays on
+    // the soft notice instead of burning a measure call on a dead end.
     if (placeId) {
+      if (outOfState) return;
       onSubmitted(trimmed, placeId);
       return;
     }
@@ -235,6 +265,7 @@ function AddressEntry({
           {touched && !placeId && !validation.ok && (
             <p className="mt-2 text-sm text-red-600">{validation.error}</p>
           )}
+          {outOfState && <p className="mt-2 text-sm text-amber-600">We only serve Florida homes at this time.</p>}
           <p className="mt-2 text-sm text-ink/60">
             Serving Florida homeowners. Enter your full address with ZIP code.
           </p>
@@ -706,6 +737,9 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
             </button>
           </div>
         </RevealItem>
+        <RevealItem>
+          <MeasurementExplainer className="mt-3" />
+        </RevealItem>
       </>
     );
   } else if (phase.kind === 'outside-florida') {
@@ -813,6 +847,10 @@ export default function StepHome({ onContinue }: { onContinue: () => void }) {
 
         <RevealItem>
           <AccuracyNotice className="mt-4 max-w-sm" />
+        </RevealItem>
+
+        <RevealItem>
+          <MeasurementExplainer className="mt-3" />
         </RevealItem>
 
         {canAdjustOutline && (

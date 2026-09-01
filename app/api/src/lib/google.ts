@@ -354,9 +354,16 @@ export interface AddressSuggestion {
   placeId: string;
 }
 
-// Global Constraints: results filtered to Florida; description contains
-// ", FL" for any real Florida street address Google returns.
-const FLORIDA_DESCRIPTION_MARKER = ', FL';
+// Suggestions are BIASED to Florida, not restricted (client decision
+// 2026-09-01): a Florida homeowner's partial input ranks Florida matches
+// first, while an out-of-state visitor still sees their own address and
+// gets the client-side "Florida only" notice on selection instead of a
+// silently empty dropdown. The old server-side ", FL" filter is gone for
+// the same reason.
+const FLORIDA_BOUNDS = {
+  low: { latitude: 24.396308, longitude: -87.634896 },
+  high: { latitude: 31.000968, longitude: -79.974306 },
+};
 const MAX_ADDRESS_SUGGESTIONS = 5;
 const AUTOCOMPLETE_TIMEOUT_MS = 3000;
 
@@ -374,7 +381,7 @@ interface PlacesAutocompleteResponse {
 // is not yet enabled on the key), network failure, or a fetch that doesn't
 // resolve within AUTOCOMPLETE_TIMEOUT_MS -- callers turn that into
 // {available:false} rather than throwing. A successful call with no
-// Florida-matching predictions returns an empty array, not null.
+// predictions returns an empty array, not null.
 export async function suggestAddresses(
   input: string,
   sessionToken: string | undefined,
@@ -389,7 +396,12 @@ export async function suggestAddresses(
         'content-type': 'application/json',
         'X-Goog-Api-Key': apiKey,
       },
-      body: JSON.stringify({ input, sessionToken, includedRegionCodes: ['us'] }),
+      body: JSON.stringify({
+        input,
+        sessionToken,
+        includedRegionCodes: ['us'],
+        locationBias: { rectangle: FLORIDA_BOUNDS },
+      }),
       signal: controller.signal,
     });
     if (!res.ok) return null;
@@ -399,7 +411,6 @@ export async function suggestAddresses(
       const description = item.placePrediction?.text?.text;
       const placeId = item.placePrediction?.placeId;
       if (!description || !placeId) continue;
-      if (!description.includes(FLORIDA_DESCRIPTION_MARKER)) continue;
       suggestions.push({ description, placeId });
       if (suggestions.length >= MAX_ADDRESS_SUGGESTIONS) break;
     }
